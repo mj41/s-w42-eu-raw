@@ -41,6 +41,9 @@
   input[type=text] { font: inherit; flex: 1; min-width: 0; padding: 9px 12px; border-radius: 10px;
                      border: 1px solid var(--border); background: var(--bg); color: var(--text); }
   .row.pixels { margin-top: 8px; gap: 6px; }
+  input.code { width: 72px; font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border);
+               background: var(--bg); color: var(--text); }
+  .irsaved { display: inline-flex; gap: 2px; }
   .row.emojis { gap: 6px; }
   .row.emojis button { padding: 6px; line-height: 0; }
   .row.emojis img { width: 32px; height: 32px; }
@@ -84,6 +87,7 @@ const empty = document.getElementById("empty");
 const connLine = document.getElementById("conn");
 const cards = new Map();     // robot id -> card
 const pendingPings = new Map(); // ping id -> {t0, resolve}
+const hex = (n) => "0x" + Number(n).toString(16).toUpperCase().padStart(2, "0");
 const serverInfo = fetch("/api/info").then((r) => r.json()).catch(() => ({})); // {https_url?}
 
 const EMOTIONS = ["neutral", "happy", "angry", "sad", "doubt", "sleepy"];
@@ -364,6 +368,80 @@ function makeCard(r) {
       el("div", { className: "muted", style: "font-size:0.85rem;margin-top:10px", textContent: "Single LEDs: 0–5 on one side, 6–11 on the other" }),
       el("div", { className: "row pixels" }, pixels.slice(0, 6)),
       el("div", { className: "row pixels" }, pixels.slice(6)));
+    if (has("power_led")) {
+      sections.push(el("div", { className: "row", style: "margin-top:10px" }, [
+        el("span", { className: "muted", textContent: "Power LED" }),
+        ...[["On", "on"], ["Blink", "blink"], ["Fast", "fast"], ["Off", "off"], ["Charging", "charging"]].map(([label, mode]) =>
+          el("button", { className: "soft", textContent: label, title: mode === "charging" ? "Lit while charging, like the default firmware" : "",
+            onclick: () => run("power_led", { mode }, "power LED " + mode) })),
+      ]));
+    }
+  }
+
+  if (has("ir_send")) {
+    // Infrared: what the robot received can be sent again or saved as a button.
+    // Saved codes live in this browser (localStorage), per robot.
+    const storeKey = "stackchan-ir-" + c.id;
+    const load = () => { try { return JSON.parse(localStorage.getItem(storeKey)) || []; } catch { return []; } };
+    const store = (codes) => { try { localStorage.setItem(storeKey, JSON.stringify(codes)); } catch { /* private mode */ } };
+    const irSend = (code, label) =>
+      run("ir_send", code.raw ? { raw: code.raw } : { address: code.address, command: code.command }, label);
+    const last = el("div", { className: "muted", textContent: "Point a remote at the robot and press a button." });
+    const lastRow = el("div", { className: "row", hidden: true, style: "margin-top:6px" });
+    const saved = el("div", { className: "row", style: "margin-top:8px" });
+    const renderSaved = () => saved.replaceChildren(...load().map((code, i) => el("span", { className: "irsaved" }, [
+      el("button", { className: "soft", textContent: code.name, onclick: () => irSend(code, "IR " + code.name) }),
+      el("button", { className: "soft", textContent: "✕", title: "Forget " + code.name,
+        onclick: () => { const codes = load(); codes.splice(i, 1); store(codes); renderSaved(); } }),
+    ])));
+    c.onIr = (d) => {
+      const nec = d.protocol === "nec";
+      if (c.irSelfTest && nec && d.address === 0xEE && d.command === 0x11) {
+        c.irSelfTest.ok = true;
+        last.textContent = "Self-test OK: the robot heard its own 38 kHz signal, so the transmitter works. " +
+          "If a device does not react, aim the robot's face at it from closer.";
+        return;
+      }
+      const code = nec ? { address: d.address, command: d.command } : { raw: d.raw };
+      last.textContent = "Last received: " + (nec ? `NEC address ${hex(d.address)}, command ${hex(d.command)}`
+        : `raw, ${(d.raw || "").split(",").length} timings`);
+      lastRow.hidden = false;
+      lastRow.replaceChildren(
+        el("button", { className: "soft", textContent: "Send again", onclick: () => irSend(code, "IR code again") }),
+        el("button", { className: "soft", textContent: "Save…", onclick: () => {
+          const name = prompt("Name for this button", nec ? "NEC " + hex(d.command) : "IR code");
+          if (!name) return;
+          store([...load(), { name, ...code }]);
+          renderSaved();
+        } }));
+    };
+    const addr = el("input", { className: "code", value: "0x00", ariaLabel: "NEC address" });
+    const cmd = el("input", { className: "code", value: "0x00", ariaLabel: "NEC command" });
+    sections.push(el("h2", { textContent: "Infrared" }), last, lastRow, saved,
+      el("div", { className: "row", style: "margin-top:8px" }, [
+        el("span", { className: "muted", textContent: "NEC address / command" }), addr, cmd,
+        el("button", { className: "soft", textContent: "Send",
+          onclick: () => run("ir_send", { address: Number(addr.value) || 0, command: Number(cmd.value) || 0 }, "IR NEC") }),
+      ]),
+      el("div", { className: "row", style: "margin-top:8px" }, [
+        // 3 s of 38 kHz light (three 1 s marks): long enough to see the LED through a phone camera.
+        el("button", { className: "soft", textContent: "Test LED (3 s)",
+          onclick: () => run("ir_send", { raw: "1000000,50000,1000000,50000,1000000" }, "IR LED test: look through a phone camera") }),
+        // The robot sends NEC 0xEE/0x11 and listens for its own reflection: proves carrier and timing.
+        el("button", { className: "soft", textContent: "Self-test", onclick: async () => {
+          c.irSelfTest = { ok: false };
+          last.textContent = "Self-test: sending… (a hand or a wall 10–30 cm in front of the robot helps)";
+          await run("ir_send", { address: 0xEE, command: 0x11, loopback: true }, "IR self-test");
+          setTimeout(() => {
+            if (c.irSelfTest && !c.irSelfTest.ok) {
+              last.textContent = "Self-test: the robot did not hear itself. Hold a hand or white paper 10–30 cm in front of it and try again.";
+            }
+            c.irSelfTest = null;
+          }, 2500);
+        } }),
+        el("span", { className: "muted", textContent: "The IR LED is next to the camera: aim the robot's face at the device. The proximity sensor can be switched off under Settings." }),
+      ]));
+    renderSaved();
   }
 
   if (has("brightness") || has("volume")) {
@@ -382,6 +460,16 @@ function makeCard(r) {
         run("brightness", { auto: c.autoBright.checked }, "auto brightness " + (c.autoBright.checked ? "on" : "off"));
       };
       sections.push(c.autoLabel = el("label", { className: "check muted", hidden: true }, [c.autoBright, "Auto brightness from the room light"]));
+    }
+    if (has("proximity")) {
+      // The proximity sensor's IR LED (next to the camera) pulses ~10x/s; switch it off e.g. while using IR.
+      c.proxBox = el("input", { type: "checkbox", checked: true });
+      c.proxBox.onchange = () => {
+        c.proxTouched = Date.now();
+        run("proximity", { on: c.proxBox.checked }, "proximity sensor " + (c.proxBox.checked ? "on" : "off"));
+      };
+      sections.push(c.proxLabel = el("label", { className: "check muted", hidden: true },
+        [c.proxBox, "Proximity sensor (its IR LED next to the camera blinks ~10×/s)"]));
     }
   }
 
@@ -670,6 +758,10 @@ function makeCard(r) {
     const keys = Object.keys(r.telemetry).filter((k) => !(k in SENSOR_LABELS)).sort();
     const sensorKeys = Object.keys(SENSOR_LABELS).filter((k) => k in r.telemetry);
     c.sensorHead.hidden = c.sensorTable.hidden = !sensorKeys.length;
+    if (c.proxLabel && "proximity_on" in r.telemetry) {
+      c.proxLabel.hidden = false;
+      if (Date.now() - (c.proxTouched || 0) > 4000) c.proxBox.checked = r.telemetry.proximity_on > 0;
+    }
     if (c.autoLabel && "auto_brightness" in r.telemetry) {
       c.autoLabel.hidden = false;
       if (Date.now() - (c.autoTouched || 0) > 4000) c.autoBright.checked = r.telemetry.auto_brightness > 0;
@@ -708,12 +800,14 @@ function makeCard(r) {
       c.blank = ev.name === "screensaver_on";
       c.blankEventAt = Date.now();
     }
+    if (ev.name === "ir_received" && c.onIr) c.onIr(ev.data || {});
     const d = ev.data || {};
     const where = "x" in d ? ` (${d.x}, ${d.y})`
       : "manual" in d ? (d.manual ? " (manual)" : " (auto)")
       : "z0" in d ? ` (zones ${d.z0}·${d.z1}·${d.z2})`
       : "ms" in d ? ` (${d.ms} ms)`
       : "value" in d ? ` (${d.value})`
+      : "protocol" in d ? (d.protocol === "nec" ? ` NEC ${hex(d.address)} / ${hex(d.command)}` : ` raw (${(d.raw || "").split(",").length} timings)`)
       : "uid" in d ? ` ${d.uid}` + (d.type ? ` (${d.type.replaceAll("_", " ")})` : "") + (d.text ? ` “${d.text}”` : "")
       : "";
     c.events.unshift(new Date(ev.ts).toLocaleTimeString() + "  " + ev.name.replaceAll("_", " ") + where);

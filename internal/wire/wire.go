@@ -109,6 +109,9 @@ type PairedBody struct {
 //	standby    {"minutes": 1..120}             offline with the screen off
 //	speaker                                    (no JSON: audio arrives as BinSpeakerPCM)
 //	nfc        {"on": bool}                    NFC tag polling (on by default)
+//	ir_send    {"address", "command"} (NEC) or {"raw": "9000,4500,...", "carrier_hz"}  infrared, us mark/space
+//	power_led  {"mode": "on|off|blink|fast|charging"}  the red power/charge LED
+//	proximity  {"on": bool}                    proximity sensor (its IR LED); on after boot
 type RobotCommandBody struct {
 	Command string         `json:"command"`
 	Args    map[string]any `json:"args,omitempty"`
@@ -120,7 +123,9 @@ type RobotCommandBody struct {
 // with data {"x", "y"} in screen pixels (320x240), "nfc_tag" with data
 // {"uid", "type", "atqa", "sak", optional "text"} (the first NDEF record: URI
 // or text), "nfc_removed" with {"uid"}, "proximity_near" / "proximity_far"
-// with {"value"} (someone came close / left), and screensaver/standby events.
+// with {"value"} (someone came close / left), "ir_received" with {"protocol":
+// "nec" or "raw", "address", "command" (NEC), "raw": "mark,space,..." (us)},
+// and screensaver/standby events.
 type RobotEventBody struct {
 	Name string         `json:"name"`
 	Data map[string]any `json:"data,omitempty"`

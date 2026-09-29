@@ -28,7 +28,7 @@ import (
 
 // Same command set as the firmware (see wire.RobotCommandBody).
 var commands = []string{"ping", "nod", "shake", "look", "home", "emotion", "say", "leds", "brightness", "volume",
-	"sticker", "face", "image", "camera", "mic", "screensaver", "standby", "speaker", "nfc"}
+	"sticker", "face", "image", "camera", "mic", "screensaver", "standby", "speaker", "nfc", "ir_send", "power_led"}
 
 func main() {
 	var (
@@ -147,7 +147,7 @@ func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) e
 		defer t.Stop()
 		eventTick = t.C
 	}
-	fakeEvents := []string{"head_press", "head_swipe_forward", "shake", "screen_tap", "nfc_tag"}
+	fakeEvents := []string{"head_press", "head_swipe_forward", "shake", "screen_tap", "nfc_tag", "ir_received"}
 	videoTick := time.NewTicker(200 * time.Millisecond) // 5 fps, like the firmware
 	defer videoTick.Stop()
 	audioTick := time.NewTicker(40 * time.Millisecond) // 40 ms PCM chunks
@@ -176,6 +176,8 @@ func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) e
 					"text": "https://github.com/mj41/stackchan-server"}
 			case ev.Name == "nfc_tag":
 				ev.Name = "shake"
+			case ev.Name == "ir_received":
+				ev.Data = map[string]any{"protocol": "nec", "address": 4, "command": 8, "raw": "9000,4500,562,562"}
 			}
 			r.log.Info("robot event", "name", ev.Name, "data", ev.Data)
 			err = send(wire.KindRobotEvent, ev)
