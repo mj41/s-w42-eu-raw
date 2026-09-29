@@ -143,7 +143,7 @@ function stat(values) {
 const ms = (x) => x.toFixed(x < 10 ? 1 : 0) + " ms";
 
 function makeCard(r) {
-  const c = { id: r.id, events: [] };
+  const c = { id: r.id, events: [], seen: new Set() };
   const has = (cmd) => r.commands.includes(cmd);
   const status = el("div", { className: "status" });
   const say = (text) => { status.textContent = text; };
@@ -162,6 +162,7 @@ function makeCard(r) {
   const sections = [
     el("div", { className: "head" }, [c.dot, el("span", { className: "name", textContent: r.id }), c.meta]),
     el("h2", { textContent: "Status" }), c.table,
+    el("h2", { textContent: "Events" }), (c.eventList = el("ul", { className: "events" })),
   ];
 
   if (has("ping")) {
@@ -250,7 +251,7 @@ function makeCard(r) {
       const head = { live: true, steps: [-15, -5, 5, 15], showNow: true };
       sections.push(el("div", { className: "axes" }, [
         slider("Yaw", -128, 128, "head_yaw_deg", "°", look, head),
-        slider("Pitch", 3, 87, "head_pitch_deg", "°", look, head),
+        slider("Pitch", 5, 85, "head_pitch_deg", "°", look, head),  // M5Stack: keep the Y servo within 5..85°
       ]));
     }
   }
@@ -303,6 +304,10 @@ function makeCard(r) {
       row.push(file, el("button", { textContent: "Send picture", onclick: () => file.click() }));
     }
     if (has("face")) row.push(el("button", { className: "soft", textContent: "Face", onclick: () => run("face") }));
+    if (has("screensaver")) {
+      row.push(el("button", { className: "soft", textContent: "Blank", onclick: () => run("screensaver", { on: true }, "blank screen") }),
+        el("button", { className: "soft", textContent: "Wake", onclick: () => run("screensaver", { on: false }, "wake screen") }));
+    }
     if (row.length) sections.push(el("div", { className: "row", style: "margin-top:8px" }, row));
   }
 
@@ -374,8 +379,7 @@ function makeCard(r) {
       el("div", { className: "row" }, [has("camera") && watch, has("mic") && listen].filter(Boolean)), img, info);
   }
 
-  c.eventList = el("ul", { className: "events" });
-  sections.push(el("h2", { textContent: "Events" }), c.eventList, status);
+  sections.push(status);
   c.root = el("section", { className: "card" }, sections);
 
   c.update = (r) => {
@@ -384,7 +388,9 @@ function makeCard(r) {
     const keys = Object.keys(r.telemetry).sort();
     c.table.replaceChildren(...(keys.length ? keys.map((k) => {
       const [label, unit] = TELEMETRY_LABELS[k] || [k, ""];
-      const v = k === "charging" || k === "screensaver" ? (r.telemetry[k] ? "yes" : "no") : r.telemetry[k] + unit;
+      const v = k === "charging" ? (r.telemetry[k] ? "yes" : "no")
+        : k === "screensaver" ? (["off", "auto", "manual"][r.telemetry[k]] || r.telemetry[k])
+        : r.telemetry[k] + unit;
       return el("tr", {}, [el("td", { textContent: label }), el("td", { textContent: v })]);
     }) : [el("tr", {}, [el("td", { className: "empty", textContent: "No telemetry yet." })])]));
     // Show the robot's reported value; follow it only when the user hasn't
@@ -402,7 +408,12 @@ function makeCard(r) {
     if (c.pingBtn) c.pingBtn.disabled = !r.online || c.pinging;
   };
   c.addEvent = (ev) => {
-    const where = ev.data && "x" in ev.data ? ` (${ev.data.x}, ${ev.data.y})` : "";
+    // The server replays recent events on (re)connect; skip ones already shown.
+    const key = `${ev.seq}|${ev.ts}`;
+    if (c.seen.has(key)) return;
+    c.seen.add(key);
+    const where = ev.data && "x" in ev.data ? ` (${ev.data.x}, ${ev.data.y})`
+      : ev.data && "manual" in ev.data ? (ev.data.manual ? " (manual)" : " (auto)") : "";
     c.events.unshift(new Date(ev.ts).toLocaleTimeString() + "  " + ev.name.replaceAll("_", " ") + where);
     c.events.length = Math.min(c.events.length, 8);
     c.eventList.replaceChildren(...c.events.map((t) => el("li", { textContent: t })));

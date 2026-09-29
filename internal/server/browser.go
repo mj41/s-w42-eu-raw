@@ -94,6 +94,11 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	for _, ev := range s.recentEvents(session) {
+		if !send(ev) {
+			return
+		}
+	}
 	fmt.Fprint(w, ": ready\n\n")
 	flusher.Flush()
 

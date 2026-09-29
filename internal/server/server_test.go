@@ -492,3 +492,27 @@ func TestMediaRelayPictureAndTap(t *testing.T) {
 		t.Fatalf("tap event %+v", ev)
 	}
 }
+
+func TestRobotEventsReplayedToLateBrowsers(t *testing.T) {
+	ts, _ := newTestServer(t)
+	robot := connectRobot(t, ts, "chan-1", wire.ClassRobot)
+	browser := pairBrowser(t, robot)
+
+	// Both events happen while no event stream is open (e.g. the phone slept).
+	robot.send(wire.KindRobotEvent, wire.RobotEventBody{Name: "screensaver_on", Data: map[string]any{"manual": 1}})
+	robot.send(wire.KindRobotEvent, wire.RobotEventBody{Name: "screensaver_off"})
+	time.Sleep(200 * time.Millisecond) // let the server record them
+
+	events := openEvents(t, browser, ts)
+	first := waitForEvent(t, events, "robot_event")
+	second := waitForEvent(t, events, "robot_event")
+	if first["name"] != "screensaver_on" || second["name"] != "screensaver_off" {
+		t.Fatalf("replayed %v then %v", first["name"], second["name"])
+	}
+	if first["seq"].(float64) >= second["seq"].(float64) {
+		t.Fatalf("seq not increasing: %v, %v", first["seq"], second["seq"])
+	}
+	if data, _ := first["data"].(map[string]any); data["manual"] != 1.0 {
+		t.Fatalf("event data lost: %+v", first)
+	}
+}

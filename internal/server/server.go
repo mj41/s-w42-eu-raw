@@ -63,7 +63,9 @@ type robotState struct {
 	lastSeen    time.Time
 	telemetry   map[string]float64
 	telemetryAt time.Time
-	cameraOn    bool // what the server last asked the robot
+	cameraOn    bool       // what the server last asked the robot
+	events      []sseEvent // recent robot_event messages, oldest first
+	eventSeq    uint64
 	micOn       bool
 }
 
@@ -242,12 +244,40 @@ func (s *Server) publish(robotID, session string, ev sseEvent) {
 }
 
 // robotEvent forwards something that happened on the robot to paired browsers.
+// Recent robot events are kept per robot and replayed to browsers that
+// connect later (after pairing, after a phone woke up), so an app can still
+// see e.g. that the screensaver went on. "seq" lets the browser skip repeats.
+const keepRobotEvents = 20
+
 func (s *Server) robotEvent(id string, ev wire.RobotEventBody) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.publish(id, "", sseEvent{name: "robot_event", data: mustJSON(map[string]any{
-		"robot": id, "name": ev.Name, "data": ev.Data, "ts": time.Now(),
-	})})
+	st := s.robots[id]
+	if st == nil {
+		return
+	}
+	st.eventSeq++
+	msg := sseEvent{name: "robot_event", data: mustJSON(map[string]any{
+		"robot": id, "seq": st.eventSeq, "name": ev.Name, "data": ev.Data, "ts": time.Now(),
+	})}
+	st.events = append(st.events, msg)
+	if len(st.events) > keepRobotEvents {
+		st.events = st.events[len(st.events)-keepRobotEvents:]
+	}
+	s.publish(id, "", msg)
+}
+
+// recentEvents returns the kept events of every robot paired with session.
+func (s *Server) recentEvents(session string) []sseEvent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []sseEvent
+	for id := range s.sessions[session] {
+		if st := s.robots[id]; st != nil {
+			out = append(out, st.events...)
+		}
+	}
+	return out
 }
 
 /* ---------------------------------- ping ---------------------------------- */

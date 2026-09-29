@@ -15,13 +15,15 @@ For each paired robot:
 - **Status:** battery, charging, head yaw/pitch, Wi-Fi, free memory, uptime, brightness, volume.
 - **Latency:** "Ping ×10" splits the round trip into browser ↔ server, server ↔ robot, and the robot's app loop.
 - **Face:** six emotions, `say` (speech bubble).
-- **Head:** nod, shake, home, and yaw/pitch sliders.
+- **Head:** nod, shake, home, and yaw/pitch sliders with ±5/±15 chips. A slider holds your target and shows the robot's reported angle ("now …"). Pitch is limited to 5–85° (M5Stack's safe range).
 - **LEDs:** left and right colour.
 - **Settings:** brightness and volume.
 - **Screen:** stickers over the face (heart, angry, sweat, shy, dizzy), or a picture from the phone. The picture is scaled to 320x240 in the browser and replaces the face until "Face".
 - **Camera & mic:** live video (JPEG, about 5 fps) and the robot's microphone, played through Web Audio. The robot streams only while someone watches or listens, and shows a red LIVE badge meanwhile.
-- **Events:** shake, head touch (press / swipe forward / swipe back), screen taps with coordinates, and screensaver on/off.
-- **Screensaver:** the robot blanks its screen after 60 s without touch (firmware option). Touch, or a command that changes the screen, brings the view back.
+- **Events:** shake, head touch (press / swipe forward / swipe back), screen taps with coordinates, and screensaver on/off. The list sits right under Status. The server replays each robot's last 20 events when a browser connects, so a phone that was asleep still sees them.
+- **Screensaver:** "Blank" and "Wake" buttons. Status shows `off`, `auto` or `manual`.
+  - **Auto:** the robot blanks after 60 s (firmware option) without touch **and** without commands or live media. Using it remotely keeps it awake, and touch or a command wakes it.
+  - **Manual:** a **double tap** on the robot or the `screensaver` command. It stays blank until a touch or "Wake".
 
 Controls appear only for the commands a robot lists in its capabilities.
 
@@ -70,7 +72,7 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 |---|---|---|
 | robot → server | `Register` (must be first) | `{"class": "robot", "capabilities": {"model", "firmware", "commands": [...], "measurements": [...]}}` |
 | robot → server | `RobotTelemetry` | `{"measurements": {"battery_pct": 87.5}}` (values are numbers) |
-| robot → server | `RobotEvent` | `{"name", "data"}`: `shake`, `head_press`, `head_swipe_forward`, `head_swipe_backward`, `screen_tap` with `{"x", "y"}`, `screensaver_on`, `screensaver_off` |
+| robot → server | `RobotEvent` | `{"name", "data"}`: `shake`, `head_press`, `head_swipe_forward`, `head_swipe_backward`, `screen_tap` with `{"x", "y"}`, `screensaver_on` with `{"manual": 0 or 1}`, `screensaver_off`. Browsers also get a per-robot `seq` |
 | robot → server | `RobotPong` | `{"id", "queue_ms"}`: answer to `ping`; `queue_ms` is time spent waiting on the robot |
 | robot → server | `Heartbeat` | `{}`, every 30 s |
 | server → robot | `Accepted` / `Rejected` | `{}` / `{"reason": "..."}` |
@@ -86,7 +88,8 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 |---|---|
 | `ping` | `{"id"}`: the robot answers with `RobotPong`. The server times its leg and sends a `pong` SSE event only to the browser that pinged. |
 | `nod`, `shake`, `home` | none |
-| `look` | `{"yaw": -128..128, "pitch": 3..87}` in degrees |
+| `look` | `{"yaw": -128..128, "pitch": 5..85}` in degrees |
+| `screensaver` | `{"on": bool}`: blank the screen (manual) or wake it |
 | `emotion` | `{"name": "neutral\|happy\|angry\|sad\|doubt\|sleepy"}` |
 | `say` | `{"text", "seconds"}`: speech bubble |
 | `sticker` | `{"name": "heart\|angry\|sweat\|shy\|dizzy", "seconds"}`: decoration over the face |
@@ -115,7 +118,7 @@ All endpoints need the session cookie of a browser that paired with the robot.
 |---|---|
 | `GET /pair?code=…` | QR target; adds the robot to this browser's session |
 | `GET /api/robots` | paired robots (JSON) |
-| `GET /api/events` | SSE: `robot` (full state), `robot_event` (to every paired browser), `pong` (only to the browser that pinged) |
+| `GET /api/events` | SSE: `robot` (full state; telemetry `screensaver` 0 off / 1 auto / 2 manual), `robot_event` (to every paired browser; the last 20 are replayed on connect), `pong` (only to the browser that pinged) |
 | `POST /api/robots/{id}/command` | `{"command", "args"}` as JSON |
 | `POST /api/robots/{id}/picture` | `image/jpeg` body, up to 192 KB |
 | `GET /api/robots/{id}/media?video=1&audio=1` | WebSocket, same origin only, carrying binary `0x01`/`0x02` |

@@ -28,7 +28,7 @@ import (
 
 // Same command set as the firmware (see wire.RobotCommandBody).
 var commands = []string{"ping", "nod", "shake", "look", "home", "emotion", "say", "leds", "brightness", "volume",
-	"sticker", "face", "image", "camera", "mic"}
+	"sticker", "face", "image", "camera", "mic", "screensaver"}
 
 func main() {
 	var (
@@ -70,6 +70,7 @@ type robot struct {
 	battery, yaw, pitch float64
 	brightness, volume  float64
 	cameraOn, micOn     bool
+	screensaver         float64 // 0 off, 1 auto, 2 manual
 	frame               int     // camera frames sent, drives the test pattern
 	phase               float64 // microphone tone phase
 	log                 *slog.Logger
@@ -187,10 +188,25 @@ func (r *robot) handle(c received, send func(string, any) error) error {
 			r.yaw = max(-128, min(128, v))
 		}
 		if v, ok := num("pitch"); ok {
-			r.pitch = max(3, min(87, v))
+			r.pitch = max(5, min(85, v))
 		}
 	case "home":
 		r.yaw, r.pitch = 0, 45
+	case "screensaver":
+		// Like the firmware: the command blanks "manually" (2) or wakes (0).
+		on, _ := c.cmd.Args["on"].(bool)
+		switch {
+		case on && r.screensaver == 0:
+			r.screensaver = 2
+			if err := send(wire.KindRobotEvent, wire.RobotEventBody{Name: "screensaver_on", Data: map[string]any{"manual": 1}}); err != nil {
+				return err
+			}
+		case !on && r.screensaver != 0:
+			r.screensaver = 0
+			if err := send(wire.KindRobotEvent, wire.RobotEventBody{Name: "screensaver_off"}); err != nil {
+				return err
+			}
+		}
 	case "camera":
 		r.cameraOn, _ = c.cmd.Args["on"].(bool)
 	case "mic":
@@ -219,7 +235,7 @@ func (r *robot) telemetry() map[string]float64 {
 		"uptime_s":       float64(int(time.Since(r.started).Seconds())),
 		"brightness_pct": r.brightness,
 		"volume_pct":     r.volume,
-		"screensaver":    0,
+		"screensaver":    r.screensaver,
 	}
 }
 
