@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stack-chan</title>
+<style>
+  :root {
+    --bg: #f4f6ff; --card: #ffffff; --text: #1e2355; --muted: #5a618e;
+    --accent: #7d8cff; --accent-text: #ffffff; --ok: #1f9d55; --off: #9aa0bd; --border: #dce1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12142a; --card: #1c1f3d; --text: #e8eaff; --muted: #a3a8cc;
+      --accent: #7d8cff; --accent-text: #0e1030; --ok: #4ade80; --off: #6b7094; --border: #2c3060;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+         font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 560px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+          padding: 16px; margin-bottom: 12px; }
+  .head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--off); flex: none; }
+  .dot.on { background: var(--ok); }
+  .name { font-weight: 600; overflow-wrap: anywhere; }
+  .meta { color: var(--muted); font-size: 0.85rem; margin-left: auto; text-align: right; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  td { padding: 4px 0; border-top: 1px solid var(--border); }
+  td:last-child { text-align: right; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 12px 20px;
+           background: var(--accent); color: var(--accent-text); cursor: pointer; min-width: 96px; }
+  button:disabled { opacity: 0.45; cursor: default; }
+  .status { color: var(--muted); font-size: 0.9rem; min-height: 1.4em; margin-top: 8px; }
+  .empty { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Stack-chan</h1>
+  <p class="sub" id="conn">Connecting…</p>
+  <div id="robots"></div>
+  <p class="empty" id="empty" hidden>
+    No robot is paired with this browser yet. Open <b>Embody Mode</b> on the Stack-chan
+    and scan the QR code it shows.
+  </p>
+</main>
+<script>
+"use strict";
+const robots = new Map();
+const statusText = new Map();
+const list = document.getElementById("robots");
+const empty = document.getElementById("empty");
+const connLine = document.getElementById("conn");
+
+function el(tag, props = {}, children = []) {
+  const e = Object.assign(document.createElement(tag), props);
+  for (const c of children) e.append(c);
+  return e;
+}
+
+function ago(iso) {
+  if (!iso) return "never";
+  const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+  return s < 60 ? s + " s ago" : Math.round(s / 60) + " min ago";
+}
+
+async function sendCommand(id, command) {
+  statusText.set(id, "Sending " + command + "…");
+  render();
+  try {
+    const res = await fetch("/api/robots/" + encodeURIComponent(id) + "/command", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command }),
+    });
+    statusText.set(id, res.ok ? "Sent " + command : "Failed: " + (await res.text()).trim());
+  } catch (err) {
+    statusText.set(id, "Failed: " + err.message);
+  }
+  render();
+}
+
+function render() {
+  const items = [...robots.values()].sort((a, b) => a.id.localeCompare(b.id));
+  empty.hidden = items.length > 0;
+  list.replaceChildren(...items.map((r) => {
+    const rows = Object.keys(r.telemetry).sort().map((k) =>
+      el("tr", {}, [el("td", { textContent: k }), el("td", { textContent: String(r.telemetry[k]) })]));
+    const buttons = r.commands.map((c) =>
+      el("button", { textContent: c, disabled: !r.online, onclick: () => sendCommand(r.id, c) }));
+    return el("section", { className: "card" }, [
+      el("div", { className: "head" }, [
+        el("span", { className: "dot" + (r.online ? " on" : "") }),
+        el("span", { className: "name", textContent: r.id }),
+        el("span", { className: "meta", textContent: (r.online ? "online" : "offline, seen " + ago(r.last_seen)) +
+          (r.model ? " · " + r.model : "") }),
+      ]),
+      rows.length ? el("table", {}, rows) : el("p", { className: "empty", textContent: "No telemetry yet." }),
+      el("div", { className: "actions" }, buttons),
+      el("div", { className: "status", textContent: statusText.get(r.id) || "" }),
+    ]);
+  }));
+}
+
+function connect() {
+  const es = new EventSource("/api/events");
+  es.addEventListener("open", () => { connLine.textContent = "Live"; });
+  es.addEventListener("robot", (ev) => {
+    const r = JSON.parse(ev.data);
+    robots.set(r.id, r);
+    render();
+  });
+  es.addEventListener("error", () => { connLine.textContent = "Reconnecting…"; });
+}
+
+render();
+connect();
+setInterval(render, 5000); // refresh "seen … ago"
+</script>
+</body>
+</html>
