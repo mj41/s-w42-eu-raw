@@ -119,7 +119,7 @@ type RobotEventBody struct {
 // Binary WebSocket messages: one type byte, then the payload.
 const (
 	BinCameraJPEG byte = 0x01 // robot -> server -> browser: camera frame (JPEG)
-	BinAudioPCM   byte = 0x02 // robot -> server -> browser: microphone, s16le mono 16 kHz
+	BinAudioPCM   byte = 0x02 // robot -> server -> browser: microphone, uint16 LE sample rate then s16le mono PCM
 	BinShowJPEG   byte = 0x10 // server -> robot: picture (JPEG, 320x240) shown instead of the face
 )
 

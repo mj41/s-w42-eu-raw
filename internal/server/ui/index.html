@@ -291,9 +291,12 @@ function makeCard(r) {
     const watch = el("button", { className: "soft", textContent: "Watch" });
     const listen = el("button", { className: "soft", textContent: "Listen" });
 
+    // Audio message: uint16 LE sample rate, then s16le mono PCM.
     const playPcm = (u8) => {
-      const pcm = new Int16Array(u8.slice().buffer);  // copy: Int16Array needs 2-byte alignment
-      const buf = media.audioCtx.createBuffer(1, pcm.length, 16000);
+      const rate = u8[0] | (u8[1] << 8);
+      const pcm = new Int16Array(u8.slice(2).buffer);  // copy: Int16Array needs 2-byte alignment
+      if (!rate || !pcm.length) return;
+      const buf = media.audioCtx.createBuffer(1, pcm.length, rate);
       const ch = buf.getChannelData(0);
       for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 32768;
       const src = media.audioCtx.createBufferSource();

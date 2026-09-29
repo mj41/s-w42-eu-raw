@@ -51,6 +51,8 @@ The frame envelope and handshake are the same as yolovm-pilot's (`~/work-stai/st
 | robot → server | `Register` (must be first) | `{"class": "robot", "capabilities": {"model", "firmware", "commands": ["nod"], "measurements": [...]}}` |
 | robot → server | `RobotTelemetry` | `{"measurements": {"battery_pct": 87.5}}` (values are numbers) |
 | robot → server | `RobotEvent` | `{"name": "shake"}`: something happened on the robot (`shake`, `head_press`, `head_swipe_forward`, `head_swipe_backward`) |
+| robot → server (binary) | `0x01` camera frame, `0x02` microphone | `0x01` + JPEG; `0x02` + sample rate (uint16 LE) + s16le mono PCM. Relayed to browsers on `/api/robots/{id}/media` |
+| server → robot (binary) | `0x10` picture | `0x10` + JPEG 320x240, shown instead of the face (`POST /api/robots/{id}/picture`) |
 | robot → server | `RobotPong` | `{"id", "queue_ms"}`: answer to the `ping` command; `queue_ms` is time spent waiting on the robot |
 | robot → server | `Heartbeat` | `{}`, every 30 s |
 | server → robot | `Accepted` / `Rejected` | `{}` / `{"reason": "..."}` |

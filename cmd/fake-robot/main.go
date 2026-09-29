@@ -299,14 +299,16 @@ func (r *robot) cameraFrame() []byte {
 	return buf.Bytes()
 }
 
-// micChunk is a quiet 440 Hz tone, s16le mono 16 kHz.
+// micChunk is a quiet 440 Hz tone: sample rate (uint16 LE), then s16le mono PCM.
 func (r *robot) micChunk(d time.Duration) []byte {
-	n := int(d.Seconds() * 16000)
-	out := make([]byte, 1, 1+2*n)
+	const rate = 16000
+	n := int(d.Seconds() * rate)
+	out := make([]byte, 1, 3+2*n)
 	out[0] = wire.BinAudioPCM
+	out = binary.LittleEndian.AppendUint16(out, rate)
 	for i := 0; i < n; i++ {
 		s := int16(3000 * math.Sin(r.phase))
-		r.phase += 2 * math.Pi * 440 / 16000
+		r.phase += 2 * math.Pi * 440 / rate
 		out = binary.LittleEndian.AppendUint16(out, uint16(s))
 	}
 	return out
