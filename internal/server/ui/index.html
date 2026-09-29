@@ -329,20 +329,6 @@ function makeCard(r) {
     ]);
   };
 
-  if (has("nod") || has("shake") || has("home") || has("look")) {
-    sections.push(el("h2", { textContent: "Head" }));
-    sections.push(el("div", { className: "row" }, ["nod", "shake", "home"].filter(has).map((cmd) =>
-      el("button", { textContent: cmd, onclick: () => run(cmd) }))));
-    if (has("look")) {
-      const look = () => run("look", { yaw: +c.sliders.head_yaw_deg.input.value, pitch: +c.sliders.head_pitch_deg.input.value }, "look");
-      const head = { live: true, steps: [-15, -5, 5, 15], showNow: true };
-      sections.push(el("div", { className: "axes" }, [
-        slider("Yaw", -128, 128, "head_yaw_deg", "°", look, head),
-        slider("Pitch", 5, 85, "head_pitch_deg", "°", look, head),  // M5Stack: keep the Y servo within 5..85°
-      ]));
-    }
-  }
-
   if (has("leds")) {
     // One colour paints all 12 LEDs (and is the effects' colour); Random and Off
     // paint them too. The single-LED pickers below always show what was sent.
@@ -535,6 +521,21 @@ function makeCard(r) {
     }, 1000);
     sections.push(el("h2", { textContent: "Camera & mic" }),
       el("div", { className: "row" }, [has("camera") && watch, has("mic") && listen].filter(Boolean)), img, info);
+  }
+
+  // Right below the camera, to steer the head while watching.
+  if (has("nod") || has("shake") || has("home") || has("look")) {
+    sections.push(el("h2", { textContent: "Head" }));
+    sections.push(el("div", { className: "row" }, ["nod", "shake", "home"].filter(has).map((cmd) =>
+      el("button", { textContent: cmd, onclick: () => run(cmd) }))));
+    if (has("look")) {
+      const look = () => run("look", { yaw: +c.sliders.head_yaw_deg.input.value, pitch: +c.sliders.head_pitch_deg.input.value }, "look");
+      const head = { live: true, steps: [-15, -5, 5, 15], showNow: true };
+      sections.push(el("div", { className: "axes" }, [
+        slider("Yaw", -128, 128, "head_yaw_deg", "°", look, head),
+        slider("Pitch", 5, 85, "head_pitch_deg", "°", look, head),  // M5Stack: keep the Y servo within 5..85°
+      ]));
+    }
   }
 
   if (has("speaker")) {
