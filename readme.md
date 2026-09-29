@@ -20,7 +20,8 @@ For each paired robot:
 - **Settings:** brightness and volume.
 - **Screen:** stickers over the face (heart, angry, sweat, shy, dizzy), or a picture from the phone. The picture is scaled to 320x240 in the browser and replaces the face until "Face".
 - **Camera & mic:** live video (JPEG, about 5 fps) and the robot's microphone, played through Web Audio. The robot streams only while someone watches or listens, and shows a red LIVE badge meanwhile.
-- **Events:** shake, head touch (press / swipe forward / swipe back), and screen taps with coordinates.
+- **Events:** shake, head touch (press / swipe forward / swipe back), screen taps with coordinates, and screensaver on/off.
+- **Screensaver:** the robot blanks its screen after 60 s without touch (firmware option). Touch, or a command that changes the screen, brings the view back.
 
 Controls appear only for the commands a robot lists in its capabilities.
 
@@ -69,7 +70,7 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 |---|---|---|
 | robot → server | `Register` (must be first) | `{"class": "robot", "capabilities": {"model", "firmware", "commands": [...], "measurements": [...]}}` |
 | robot → server | `RobotTelemetry` | `{"measurements": {"battery_pct": 87.5}}` (values are numbers) |
-| robot → server | `RobotEvent` | `{"name", "data"}`: `shake`, `head_press`, `head_swipe_forward`, `head_swipe_backward`, `screen_tap` with `{"x", "y"}` |
+| robot → server | `RobotEvent` | `{"name", "data"}`: `shake`, `head_press`, `head_swipe_forward`, `head_swipe_backward`, `screen_tap` with `{"x", "y"}`, `screensaver_on`, `screensaver_off` |
 | robot → server | `RobotPong` | `{"id", "queue_ms"}`: answer to `ping`; `queue_ms` is time spent waiting on the robot |
 | robot → server | `Heartbeat` | `{}`, every 30 s |
 | server → robot | `Accepted` / `Rejected` | `{}` / `{"reason": "..."}` |

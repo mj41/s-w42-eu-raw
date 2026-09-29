@@ -88,6 +88,7 @@ const TELEMETRY_LABELS = {
   battery_pct: ["Battery", "%"], charging: ["Charging", ""], head_yaw_deg: ["Head yaw", "°"],
   head_pitch_deg: ["Head pitch", "°"], wifi_rssi_dbm: ["Wi-Fi", " dBm"], free_heap_kb: ["Free memory", " kB"],
   uptime_s: ["Uptime", " s"], brightness_pct: ["Brightness", "%"], volume_pct: ["Volume", "%"],
+  screensaver: ["Screensaver", ""],
 };
 
 function el(tag, props = {}, children = []) {
@@ -361,7 +362,7 @@ function makeCard(r) {
     const keys = Object.keys(r.telemetry).sort();
     c.table.replaceChildren(...(keys.length ? keys.map((k) => {
       const [label, unit] = TELEMETRY_LABELS[k] || [k, ""];
-      const v = k === "charging" ? (r.telemetry[k] ? "yes" : "no") : r.telemetry[k] + unit;
+      const v = k === "charging" || k === "screensaver" ? (r.telemetry[k] ? "yes" : "no") : r.telemetry[k] + unit;
       return el("tr", {}, [el("td", { textContent: label }), el("td", { textContent: v })]);
     }) : [el("tr", {}, [el("td", { className: "empty", textContent: "No telemetry yet." })])]));
     // Follow the robot's reported values, except while the user drags a slider.

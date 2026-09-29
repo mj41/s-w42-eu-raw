@@ -108,7 +108,7 @@ func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) e
 			Firmware: "fake-robot",
 			Commands: commands,
 			Measurements: []string{"battery_pct", "charging", "head_yaw_deg", "head_pitch_deg",
-				"wifi_rssi_dbm", "free_heap_kb", "uptime_s", "brightness_pct", "volume_pct"},
+				"wifi_rssi_dbm", "free_heap_kb", "uptime_s", "brightness_pct", "volume_pct", "screensaver"},
 		},
 	}
 	if err := send(wire.KindRegister, reg); err != nil {
@@ -219,6 +219,7 @@ func (r *robot) telemetry() map[string]float64 {
 		"uptime_s":       float64(int(time.Since(r.started).Seconds())),
 		"brightness_pct": r.brightness,
 		"volume_pct":     r.volume,
+		"screensaver":    0,
 	}
 }
 
