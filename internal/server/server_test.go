@@ -49,7 +49,7 @@ func connectRobot(t *testing.T, ts *httptest.Server, id string, class string) *t
 	r := &testRobot{t: t, ws: ws}
 	r.send(wire.KindRegister, wire.RegisterBody{
 		Class:        class,
-		Capabilities: wire.RobotCapabilities{Model: "test", Commands: []string{"nod", "ping", "camera", "mic", "image"}},
+		Capabilities: wire.RobotCapabilities{Model: "test", Commands: []string{"nod", "ping", "camera", "mic", "image", "speaker"}},
 	})
 	return r
 }
@@ -541,5 +541,30 @@ func TestStandbyShownWhileOffline(t *testing.T) {
 	back.expect(wire.KindAccepted, &accepted)
 	if views := listRobots(t, browser, ts); !views[0].Online || views[0].StandbyUntil != nil {
 		t.Fatalf("after reconnect: %+v", views[0])
+	}
+}
+
+func TestSpeakerAudioToRobot(t *testing.T) {
+	ts, _ := newTestServer(t)
+	robot := connectRobot(t, ts, "chan-1", wire.ClassRobot)
+	browser := pairBrowser(t, robot)
+
+	media, _, err := dialMedia(ts, browser, "chan-1", "video=0&audio=0", ts.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer media.Close()
+	pcm := []byte{wire.BinSpeakerPCM, 0xC0, 0x5D, 1, 0, 2, 0} // 24000 Hz, two samples
+	if err := media.WriteMessage(websocket.BinaryMessage, pcm); err != nil {
+		t.Fatal(err)
+	}
+	if got := robot.expectBinary(); string(got) != string(pcm) {
+		t.Fatalf("robot got %v, want %v", got, pcm)
+	}
+	// Other binary types from the browser are ignored.
+	media.WriteMessage(websocket.BinaryMessage, []byte{wire.BinShowJPEG, 0xFF, 0xD8, 0})
+	media.WriteMessage(websocket.BinaryMessage, pcm)
+	if got := robot.expectBinary(); got[0] != wire.BinSpeakerPCM {
+		t.Fatalf("robot got type %#x, want speaker audio", got[0])
 	}
 }

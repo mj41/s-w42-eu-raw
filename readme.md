@@ -20,6 +20,7 @@ For each paired robot:
 - **Settings:** brightness and volume.
 - **Screen:** stickers over the face (heart, angry, sweat, shy, dizzy), or a picture from the phone. The picture is scaled to 320x240 in the browser and replaces the face until "Face".
 - **Camera & mic:** live video (JPEG, about 5 fps) and the robot's microphone, played through Web Audio. The robot streams only while someone watches or listens, and shows a red LIVE badge meanwhile.
+- **Speaker:** "Hold to talk" streams your microphone to the robot, "Play sound file" plays any audio file the browser can decode, and "Beep" is a test tone. Audio is resampled to 24 kHz in the browser and the robot's mouth moves while it plays. Talking needs a secure page (`https://` or `http://localhost`); files and Beep work anywhere.
 - **Events:** shake, head touch (press / swipe forward / swipe back), screen taps with coordinates, and screensaver on/off. The list sits right under Status. The server replays each robot's last 20 events when a browser connects, so a phone that was asleep still sees them.
 - **Screen & power** (right after Events): "Screensaver on" / "Screensaver off", and "Standby" for 1–60 min.
   - **Status** shows the screensaver as `off`, `auto` or `manual`.
@@ -112,6 +113,7 @@ The first byte is the type, followed by the payload.
 |---|---|---|
 | `0x01` | robot → server → browser | camera frame, JPEG |
 | `0x02` | robot → server → browser | microphone: sample rate (uint16 LE), then s16le mono PCM |
+| `0x03` | browser → server → robot | speaker: sample rate (uint16 LE), then s16le mono PCM. Sent on the media socket; forwarded only to robots that list `speaker` |
 | `0x10` | server → robot | picture, JPEG 320x240, shown instead of the face |
 
 ### Browser API

@@ -120,6 +120,7 @@ type RobotEventBody struct {
 const (
 	BinCameraJPEG byte = 0x01 // robot -> server -> browser: camera frame (JPEG)
 	BinAudioPCM   byte = 0x02 // robot -> server -> browser: microphone, uint16 LE sample rate then s16le mono PCM
+	BinSpeakerPCM byte = 0x03 // browser -> server -> robot: speaker, same layout as BinAudioPCM
 	BinShowJPEG   byte = 0x10 // server -> robot: picture (JPEG, 320x240) shown instead of the face
 )
 

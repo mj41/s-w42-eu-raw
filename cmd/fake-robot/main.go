@@ -28,7 +28,7 @@ import (
 
 // Same command set as the firmware (see wire.RobotCommandBody).
 var commands = []string{"ping", "nod", "shake", "look", "home", "emotion", "say", "leds", "brightness", "volume",
-	"sticker", "face", "image", "camera", "mic", "screensaver", "standby"}
+	"sticker", "face", "image", "camera", "mic", "screensaver", "standby", "speaker"}
 
 func main() {
 	var (
@@ -267,6 +267,7 @@ func (r *robot) telemetry() map[string]float64 {
 }
 
 func readLoop(ws *websocket.Conn, cmds chan<- received, log *slog.Logger) error {
+	var speakerSec float64 // speaker audio received since the last log line
 	for {
 		kind, data, err := ws.ReadMessage()
 		if err != nil {
@@ -274,9 +275,18 @@ func readLoop(ws *websocket.Conn, cmds chan<- received, log *slog.Logger) error 
 		}
 		at := time.Now()
 		if kind == websocket.BinaryMessage {
-			if len(data) > 1 && data[0] == wire.BinShowJPEG {
+			switch {
+			case len(data) > 1 && data[0] == wire.BinShowJPEG:
 				cfg, err := jpeg.DecodeConfig(bytes.NewReader(data[1:]))
 				log.Info("picture received", "bytes", len(data)-1, "width", cfg.Width, "height", cfg.Height, "err", err)
+			case len(data) > 3 && data[0] == wire.BinSpeakerPCM:
+				if rate := binary.LittleEndian.Uint16(data[1:3]); rate > 0 {
+					speakerSec += float64((len(data)-3)/2) / float64(rate)
+					if speakerSec >= 1 {
+						log.Info("speaker audio received", "seconds", round1(speakerSec), "rate", rate)
+						speakerSec = 0
+					}
+				}
 			}
 			continue
 		}

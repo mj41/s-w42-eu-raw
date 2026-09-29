@@ -126,13 +126,24 @@ func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
 		s.log.Info("media viewer left", "robot", id)
 	}()
 
-	// The browser sends nothing; reading only detects that it went away.
+	// The browser may send speaker audio (BinSpeakerPCM); reading also detects
+	// that it went away.
+	ws.SetReadLimit(maxSpeakerMessage)
 	gone := make(chan struct{})
 	go func() {
 		defer close(gone)
+		logged := false
 		for {
-			if _, _, err := ws.NextReader(); err != nil {
+			kind, msg, err := ws.ReadMessage()
+			if err != nil {
 				return
+			}
+			if kind != websocket.BinaryMessage || len(msg) < 4 || msg[0] != wire.BinSpeakerPCM {
+				continue
+			}
+			if s.forwardSpeaker(id, msg) && !logged {
+				logged = true
+				s.log.Info("speaker audio from browser", "robot", id)
 			}
 		}
 	}()
@@ -197,4 +208,21 @@ func (s *Server) handlePicture(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log.Info("picture sent", "robot", id, "bytes", len(body))
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "sent"})
+}
+
+// maxSpeakerMessage bounds one browser audio message (100 ms at 24 kHz is ~4.8 KB).
+const maxSpeakerMessage = 64 << 10
+
+// forwardSpeaker sends browser audio to the robot's speaker, if it has one and
+// is online. Audio is dropped when the robot's queue is full: late audio is
+// worse than a gap.
+func (s *Server) forwardSpeaker(robotID string, msg []byte) bool {
+	s.mu.Lock()
+	st := s.robots[robotID]
+	var conn *robotConn
+	if st != nil && slices.Contains(st.caps.Commands, "speaker") {
+		conn = st.conn
+	}
+	s.mu.Unlock()
+	return conn != nil && conn.enqueueBinary(msg)
 }

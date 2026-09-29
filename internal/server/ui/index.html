@@ -417,6 +417,105 @@ function makeCard(r) {
       el("div", { className: "row" }, [has("camera") && watch, has("mic") && listen].filter(Boolean)), img, info);
   }
 
+  if (has("speaker")) {
+    // Audio to the robot's speaker: binary 0x03 + sample rate (uint16 LE) + s16le mono,
+    // over its own media socket. The robot plays 24 kHz; we resample here.
+    const RATE = 24000;
+    const spk = { ws: null, ready: null, talk: null };
+    const info = el("div", { className: "muted stats" });
+    const socket = () => {
+      if (spk.ws && spk.ws.readyState <= 1) return spk.ready;
+      const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/robots/${encodeURIComponent(c.id)}/media?video=0&audio=0`);
+      spk.ws = ws;
+      spk.ready = new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = () => reject(new Error("speaker socket failed")); });
+      return spk.ready;
+    };
+    const send = (f32) => {
+      const msg = new Uint8Array(3 + f32.length * 2);
+      msg[0] = 0x03; msg[1] = RATE & 0xff; msg[2] = RATE >> 8;
+      const pcm = new DataView(msg.buffer, 3);
+      for (let i = 0; i < f32.length; i++) pcm.setInt16(i * 2, Math.max(-1, Math.min(1, f32[i])) * 32767, true);
+      if (spk.ws && spk.ws.readyState === 1) spk.ws.send(msg);
+    };
+    const resample = (f32, from) => {
+      if (from === RATE) return f32;
+      const out = new Float32Array(Math.floor(f32.length * RATE / from));
+      for (let i = 0; i < out.length; i++) {
+        const x = i * from / RATE, j = Math.floor(x), t = x - j;
+        out[i] = (f32[j] || 0) * (1 - t) + (f32[j + 1] || 0) * t;
+      }
+      return out;
+    };
+    // Paced send: 100 ms chunks, at most ~400 ms ahead of real time.
+    const playSamples = async (f32) => {
+      await socket();
+      wakeIfBlank();
+      const chunk = RATE / 10, start = performance.now();
+      for (let i = 0; i < f32.length; i += chunk) {
+        const ahead = (i / RATE) * 1000 - (performance.now() - start);
+        if (ahead > 400) await new Promise((r) => setTimeout(r, ahead - 400));
+        send(f32.subarray(i, i + chunk));
+      }
+    };
+    const playFile = async (file) => {
+      const buf = await new (window.AudioContext || window.webkitAudioContext)().decodeAudioData(await file.arrayBuffer());
+      const off = new OfflineAudioContext(1, Math.ceil(buf.duration * RATE), RATE);
+      const src = off.createBufferSource();
+      src.buffer = buf;
+      src.connect(off.destination);
+      src.start();
+      const f32 = (await off.startRendering()).getChannelData(0);
+      info.textContent = `Playing ${file.name} (${buf.duration.toFixed(1)} s)`;
+      await playSamples(f32);
+      info.textContent = "";
+    };
+    const beep = () => {
+      const f32 = new Float32Array(RATE * 0.3);
+      for (let i = 0; i < f32.length; i++) f32[i] = 0.3 * Math.sin(2 * Math.PI * 880 * i / RATE) * Math.min(1, (f32.length - i) / 800);
+      return playSamples(f32);
+    };
+    const startTalk = async () => {
+      if (spk.talk) return;
+      await socket();
+      wakeIfBlank();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const node = ctx.createScriptProcessor(2048, 1, 1);
+      node.onaudioprocess = (e) => send(resample(e.inputBuffer.getChannelData(0), ctx.sampleRate));
+      ctx.createMediaStreamSource(stream).connect(node);
+      node.connect(ctx.destination); // required for onaudioprocess; the output stays silent
+      spk.talk = { stream, ctx };
+      talk.textContent = "Talking… release to stop";
+    };
+    const stopTalk = () => {
+      if (!spk.talk) return;
+      spk.talk.stream.getTracks().forEach((t) => t.stop());
+      spk.talk.ctx.close();
+      spk.talk = null;
+      talk.textContent = "Hold to talk";
+    };
+
+    const talk = el("button", { textContent: "Hold to talk", style: "touch-action:none;user-select:none" });
+    if (window.isSecureContext && navigator.mediaDevices) {
+      talk.onpointerdown = (e) => { e.preventDefault(); startTalk().catch((err) => say("Talk failed: " + err.message)); };
+      talk.onpointerup = talk.onpointerleave = talk.onpointercancel = stopTalk;
+    } else {
+      talk.disabled = true;
+      talk.dataset.alwaysDisabled = "1";
+      info.textContent = "Talking needs a secure page: https://… or http://localhost on this computer.";
+    }
+    const file = el("input", { type: "file", accept: "audio/*", hidden: true });
+    file.onchange = () => {
+      if (file.files.length) playFile(file.files[0]).catch((err) => say("Play failed: " + err.message));
+      file.value = "";
+    };
+    sections.push(el("h2", { textContent: "Speaker" }), el("div", { className: "row" }, [
+      talk, file,
+      el("button", { className: "soft", textContent: "Play sound file", onclick: () => file.click() }),
+      el("button", { className: "soft", textContent: "Beep", onclick: () => beep().catch((err) => say("Beep failed: " + err.message)) }),
+    ]), info);
+  }
+
   sections.push(status);
   c.root = el("section", { className: "card" }, sections);
 
@@ -449,7 +548,7 @@ function makeCard(r) {
         s.value.textContent = reported + s.unit;
       }
     }
-    c.root.querySelectorAll("button, input, select").forEach((e) => { e.disabled = !r.online; });
+    c.root.querySelectorAll("button, input, select").forEach((e) => { e.disabled = !r.online || e.dataset.alwaysDisabled === "1"; });
     if (c.pingBtn) c.pingBtn.disabled = !r.online || c.pinging;
   };
   c.addEvent = (ev) => {
