@@ -81,7 +81,7 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 
 	reg, reason := readRegister(ws, id)
 	if reason != "" {
-		s.log.Warn("robot rejected", "robot", id, "reason", reason, "remote", r.RemoteAddr)
+		s.log.Warn("robot rejected", "robot", id, "reason", reason, "remote", clientIP(r))
 		if f, err := wire.Marshal(wire.KindRejected, wire.Meta{}, wire.RejectedBody{Reason: reason}); err == nil {
 			ws.SetWriteDeadline(time.Now().Add(writeWait))
 			ws.WriteMessage(websocket.TextMessage, f)
@@ -92,7 +92,7 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 	s.attach(c, reg)
 	defer s.detach(c)
 	s.log.Info("robot connected", "robot", id, "model", reg.Capabilities.Model,
-		"firmware", reg.Capabilities.Firmware, "remote", r.RemoteAddr)
+		"firmware", reg.Capabilities.Firmware, "remote", clientIP(r))
 	defer s.log.Info("robot disconnected", "robot", id)
 
 	if f, err := wire.Marshal(wire.KindAccepted, wire.Meta{WorkerID: id, SessionID: newCode()}, nil); err == nil {
@@ -194,6 +194,21 @@ func (s *Server) handleRobotFrame(c *robotConn, f wire.Frame) {
 	switch f.Kind {
 	case wire.KindHeartbeat:
 		s.touch(c.id)
+	case wire.KindRobotEvent:
+		var body wire.RobotEventBody
+		if err := f.Decode(&body); err != nil || body.Name == "" {
+			s.log.Warn("bad robot event", "robot", c.id, "err", err)
+			return
+		}
+		s.log.Info("robot event", "robot", c.id, "name", body.Name)
+		s.robotEvent(c.id, body.Name)
+	case wire.KindRobotPong:
+		var body wire.RobotPongBody
+		if err := f.Decode(&body); err != nil {
+			s.log.Warn("bad pong", "robot", c.id, "err", err)
+			return
+		}
+		s.finishPing(c.id, body)
 	case wire.KindRobotTelemetry:
 		var body wire.RobotTelemetryBody
 		if err := f.Decode(&body); err != nil {
@@ -205,4 +220,14 @@ func (s *Server) handleRobotFrame(c *robotConn, f wire.Frame) {
 		// Unknown kinds are ignored for forward compatibility.
 		s.log.Debug("ignoring frame", "robot", c.id, "kind", f.Kind)
 	}
+}
+
+// clientIP is the robot's address for logs: behind the TLS gateway RemoteAddr
+// is the gateway, and the real client is the first X-Forwarded-For entry.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		first, _, _ := strings.Cut(xff, ",")
+		return strings.TrimSpace(first)
+	}
+	return r.RemoteAddr
 }

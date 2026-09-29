@@ -26,6 +26,8 @@ const (
 	KindRegister       = "Register"
 	KindHeartbeat      = "Heartbeat"
 	KindRobotTelemetry = "RobotTelemetry"
+	KindRobotEvent     = "RobotEvent"
+	KindRobotPong      = "RobotPong"
 
 	// Server -> robot.
 	KindAccepted     = "Accepted"
@@ -86,9 +88,32 @@ type PairedBody struct {
 	Viewers int `json:"viewers"`
 }
 
+// RobotCommandBody is one command. The "basic" command set a Stack-chan offers:
+//
+//	ping       {"id": "..."}                  answered by RobotPong
+//	nod, shake, home                           head gestures
+//	look       {"yaw": deg, "pitch": deg}
+//	emotion    {"name": "neutral|happy|angry|sad|doubt|sleepy"}
+//	say        {"text": "...", "seconds": 6}   speech bubble
+//	leds       {"left": "#rrggbb", "right": "#rrggbb"}
+//	brightness {"value": 1..100}
+//	volume     {"value": 0..100}
 type RobotCommandBody struct {
 	Command string         `json:"command"`
 	Args    map[string]any `json:"args,omitempty"`
+}
+
+// RobotEventBody reports something that happened on the robot, e.g. "shake",
+// "pickup", "head_press", "head_swipe_forward", "head_swipe_backward".
+type RobotEventBody struct {
+	Name string `json:"name"`
+}
+
+// RobotPongBody answers the "ping" command. QueueMs is how long the ping
+// waited on the robot between arriving and being handled.
+type RobotPongBody struct {
+	ID      string  `json:"id"`
+	QueueMs float64 `json:"queue_ms"`
 }
 
 // Marshal builds one frame. A nil body is sent as {}.

@@ -7,12 +7,12 @@
 <style>
   :root {
     --bg: #f4f6ff; --card: #ffffff; --text: #1e2355; --muted: #5a618e;
-    --accent: #7d8cff; --accent-text: #ffffff; --ok: #1f9d55; --off: #9aa0bd; --border: #dce1f5;
+    --accent: #7d8cff; --accent-text: #ffffff; --soft: #e8ebff; --ok: #1f9d55; --off: #9aa0bd; --border: #dce1f5;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #12142a; --card: #1c1f3d; --text: #e8eaff; --muted: #a3a8cc;
-      --accent: #7d8cff; --accent-text: #0e1030; --ok: #4ade80; --off: #6b7094; --border: #2c3060;
+      --accent: #7d8cff; --accent-text: #0e1030; --soft: #262a52; --ok: #4ade80; --off: #6b7094; --border: #2c3060;
     }
   }
   * { box-sizing: border-box; }
@@ -20,10 +20,12 @@
          font: 16px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
   main { max-width: 560px; margin: 0 auto; }
   h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+       margin: 16px 0 8px; }
   .sub { color: var(--muted); margin: 0 0 16px; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px;
           padding: 16px; margin-bottom: 12px; }
-  .head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .head { display: flex; align-items: center; gap: 8px; }
   .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--off); flex: none; }
   .dot.on { background: var(--ok); }
   .name { font-weight: 600; overflow-wrap: anywhere; }
@@ -31,11 +33,23 @@
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   td { padding: 4px 0; border-top: 1px solid var(--border); }
   td:last-child { text-align: right; }
-  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-  button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 12px 20px;
-           background: var(--accent); color: var(--accent-text); cursor: pointer; min-width: 96px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 10px 16px;
+           background: var(--accent); color: var(--accent-text); cursor: pointer; }
+  button.soft { background: var(--soft); color: var(--text); }
   button:disabled { opacity: 0.45; cursor: default; }
-  .status { color: var(--muted); font-size: 0.9rem; min-height: 1.4em; margin-top: 8px; }
+  input[type=text] { font: inherit; flex: 1; min-width: 0; padding: 9px 12px; border-radius: 10px;
+                     border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+  input[type=color] { width: 48px; height: 40px; border: 1px solid var(--border); border-radius: 10px;
+                      background: var(--bg); padding: 2px; }
+  label.slider { display: grid; grid-template-columns: 5.5em 1fr 3.5em; align-items: center; gap: 8px; width: 100%; }
+  label.slider span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .muted { color: var(--muted); font-size: 0.9rem; }
+  .stats { font-variant-numeric: tabular-nums; }
+  .events { list-style: none; margin: 0; padding: 0; font-variant-numeric: tabular-nums; }
+  .events li { padding: 3px 0; border-top: 1px solid var(--border); }
+  .status { color: var(--muted); font-size: 0.9rem; min-height: 1.4em; margin-top: 12px; }
   .empty { color: var(--muted); }
 </style>
 </head>
@@ -51,11 +65,18 @@
 </main>
 <script>
 "use strict";
-const robots = new Map();
-const statusText = new Map();
 const list = document.getElementById("robots");
 const empty = document.getElementById("empty");
 const connLine = document.getElementById("conn");
+const cards = new Map();     // robot id -> card
+const pendingPings = new Map(); // ping id -> {t0, resolve}
+
+const EMOTIONS = ["neutral", "happy", "angry", "sad", "doubt", "sleepy"];
+const TELEMETRY_LABELS = {
+  battery_pct: ["Battery", "%"], charging: ["Charging", ""], head_yaw_deg: ["Head yaw", "°"],
+  head_pitch_deg: ["Head pitch", "°"], wifi_rssi_dbm: ["Wi-Fi", " dBm"], free_heap_kb: ["Free memory", " kB"],
+  uptime_s: ["Uptime", " s"], brightness_pct: ["Brightness", "%"], volume_pct: ["Volume", "%"],
+};
 
 function el(tag, props = {}, children = []) {
   const e = Object.assign(document.createElement(tag), props);
@@ -69,58 +90,226 @@ function ago(iso) {
   return s < 60 ? s + " s ago" : Math.round(s / 60) + " min ago";
 }
 
-async function sendCommand(id, command) {
-  statusText.set(id, "Sending " + command + "…");
-  render();
-  try {
-    const res = await fetch("/api/robots/" + encodeURIComponent(id) + "/command", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ command }),
-    });
-    statusText.set(id, res.ok ? "Sent " + command : "Failed: " + (await res.text()).trim());
-  } catch (err) {
-    statusText.set(id, "Failed: " + err.message);
-  }
-  render();
+async function sendCommand(id, command, args) {
+  const res = await fetch("/api/robots/" + encodeURIComponent(id) + "/command", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(args ? { command, args } : { command }),
+  });
+  if (!res.ok) throw new Error((await res.text()).trim());
 }
 
-function render() {
-  const items = [...robots.values()].sort((a, b) => a.id.localeCompare(b.id));
-  empty.hidden = items.length > 0;
-  list.replaceChildren(...items.map((r) => {
-    const rows = Object.keys(r.telemetry).sort().map((k) =>
-      el("tr", {}, [el("td", { textContent: k }), el("td", { textContent: String(r.telemetry[k]) })]));
-    const buttons = r.commands.map((c) =>
-      el("button", { textContent: c, disabled: !r.online, onclick: () => sendCommand(r.id, c) }));
-    return el("section", { className: "card" }, [
-      el("div", { className: "head" }, [
-        el("span", { className: "dot" + (r.online ? " on" : "") }),
-        el("span", { className: "name", textContent: r.id }),
-        el("span", { className: "meta", textContent: (r.online ? "online" : "offline, seen " + ago(r.last_seen)) +
-          (r.model ? " · " + r.model : "") }),
-      ]),
-      rows.length ? el("table", {}, rows) : el("p", { className: "empty", textContent: "No telemetry yet." }),
-      el("div", { className: "actions" }, buttons),
-      el("div", { className: "status", textContent: statusText.get(r.id) || "" }),
-    ]);
-  }));
+// ping: browser -> server -> robot -> server -> browser. The server reports its
+// own round trip to the robot, so the browser <-> server part is the rest.
+async function pingOnce(robotId) {
+  const id = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, "0")).join("");
+  const t0 = performance.now();
+  const answer = new Promise((resolve, reject) => {
+    pendingPings.set(id, { t0, resolve });
+    setTimeout(() => { if (pendingPings.delete(id)) reject(new Error("timeout")); }, 3000);
+  });
+  try {
+    await sendCommand(robotId, "ping", { id });
+  } catch (err) {
+    pendingPings.delete(id);
+    throw err;
+  }
+  return answer;
+}
+
+function stat(values) {
+  const v = [...values].sort((a, b) => a - b);
+  const avg = v.reduce((a, b) => a + b, 0) / v.length;
+  return { min: v[0], med: v[Math.floor(v.length / 2)], avg, max: v[v.length - 1] };
+}
+const ms = (x) => x.toFixed(x < 10 ? 1 : 0) + " ms";
+
+function makeCard(r) {
+  const c = { id: r.id, dragging: new Set(), events: [] };
+  const has = (cmd) => r.commands.includes(cmd);
+  const status = el("div", { className: "status" });
+  const say = (text) => { status.textContent = text; };
+  const run = async (command, args, label) => {
+    try {
+      await sendCommand(c.id, command, args);
+      say("Sent " + (label || command));
+    } catch (err) {
+      say("Failed: " + err.message);
+    }
+  };
+
+  c.dot = el("span", { className: "dot" });
+  c.meta = el("span", { className: "meta" });
+  c.table = el("table");
+  const sections = [
+    el("div", { className: "head" }, [c.dot, el("span", { className: "name", textContent: r.id }), c.meta]),
+    el("h2", { textContent: "Status" }), c.table,
+  ];
+
+  if (has("ping")) {
+    c.pingStats = el("div", { className: "stats muted", textContent: "Measures browser → server → robot and back." });
+    const btn = el("button", { textContent: "Ping ×10", className: "soft" });
+    c.pingBtn = btn;
+    btn.onclick = async () => {
+      c.pinging = true;
+      btn.disabled = true;
+      const total = [], robot = [], queue = [];
+      let lost = 0;
+      for (let i = 0; i < 10; i++) {
+        try {
+          const p = await pingOnce(c.id);
+          total.push(p.total); robot.push(p.server_robot_ms); queue.push(p.robot_queue_ms);
+          c.pingStats.textContent = `${total.length}/10 · last ${ms(p.total)}`;
+        } catch (err) {
+          lost++;
+          if (err.message !== "timeout") { say("Ping failed: " + err.message); break; }
+        }
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      if (total.length) {
+        const t = stat(total), s = stat(robot), q = stat(queue);
+        c.pingStats.replaceChildren(
+          el("div", { textContent: `Round trip: median ${ms(t.med)} · min ${ms(t.min)} · max ${ms(t.max)}` + (lost ? ` · ${lost} lost` : "") }),
+          el("div", { textContent: `Browser ↔ server ≈ ${ms(Math.max(0, t.med - s.med))} · server ↔ robot ${ms(s.med)} · robot loop ${ms(q.med)}` }),
+        );
+      }
+      c.pinging = false;
+      btn.disabled = !c.robot.online;
+    };
+    sections.push(el("h2", { textContent: "Latency" }), el("div", { className: "row" }, [btn]), c.pingStats);
+  }
+
+  if (has("emotion") || has("say")) {
+    sections.push(el("h2", { textContent: "Face" }));
+    if (has("emotion")) {
+      sections.push(el("div", { className: "row" }, EMOTIONS.map((name) =>
+        el("button", { className: "soft", textContent: name, onclick: () => run("emotion", { name }, name) }))));
+    }
+    if (has("say")) {
+      const input = el("input", { type: "text", placeholder: "Say something…", maxLength: 80 });
+      const go = () => { if (input.value.trim()) { run("say", { text: input.value.trim(), seconds: 6 }, "say"); input.value = ""; } };
+      input.onkeydown = (e) => { if (e.key === "Enter") go(); };
+      sections.push(el("div", { className: "row", style: "margin-top:8px" }, [input, el("button", { textContent: "Say", onclick: go })]));
+    }
+  }
+
+  const slider = (label, min, max, key, unit, onValue, live) => {
+    const input = el("input", { type: "range", min, max, value: Math.round((min + max) / 2) });
+    const value = el("span", { textContent: input.value + unit });
+    let timer = 0;
+    input.oninput = () => {
+      value.textContent = input.value + unit;
+      c.dragging.add(key);
+      if (live) { clearTimeout(timer); timer = setTimeout(() => onValue(+input.value), 120); }
+    };
+    input.onchange = () => { c.dragging.delete(key); clearTimeout(timer); onValue(+input.value); };
+    c.sliders = c.sliders || {};
+    c.sliders[key] = { input, value, unit };
+    return el("label", { className: "slider" }, [el("span", { textContent: label }), input, value]);
+  };
+
+  if (has("nod") || has("shake") || has("home") || has("look")) {
+    sections.push(el("h2", { textContent: "Head" }));
+    sections.push(el("div", { className: "row" }, ["nod", "shake", "home"].filter(has).map((cmd) =>
+      el("button", { textContent: cmd, onclick: () => run(cmd) }))));
+    if (has("look")) {
+      const look = () => run("look", { yaw: +c.sliders.head_yaw_deg.input.value, pitch: +c.sliders.head_pitch_deg.input.value }, "look");
+      sections.push(el("div", { className: "row", style: "margin-top:8px" }, [
+        slider("Yaw", -128, 128, "head_yaw_deg", "°", look, true),
+        slider("Pitch", 3, 87, "head_pitch_deg", "°", look, true),
+      ]));
+    }
+  }
+
+  if (has("leds")) {
+    const left = el("input", { type: "color", value: "#7d8cff" });
+    const right = el("input", { type: "color", value: "#ff3d9a" });
+    const send = () => run("leds", { left: left.value, right: right.value }, "LEDs");
+    left.onchange = send;
+    right.onchange = send;
+    sections.push(el("h2", { textContent: "LEDs" }), el("div", { className: "row" }, [
+      el("span", { className: "muted", textContent: "Left" }), left,
+      el("span", { className: "muted", textContent: "Right" }), right,
+      el("button", { className: "soft", textContent: "Off", onclick: () => run("leds", { left: "#000000", right: "#000000" }, "LEDs off") }),
+    ]));
+  }
+
+  if (has("brightness") || has("volume")) {
+    sections.push(el("h2", { textContent: "Settings" }));
+    const rows = [];
+    if (has("brightness")) rows.push(slider("Brightness", 1, 100, "brightness_pct", "%", (v) => run("brightness", { value: v }, "brightness"), false));
+    if (has("volume")) rows.push(slider("Volume", 0, 100, "volume_pct", "%", (v) => run("volume", { value: v }, "volume"), false));
+    sections.push(el("div", { className: "row" }, rows));
+  }
+
+  c.eventList = el("ul", { className: "events" });
+  sections.push(el("h2", { textContent: "Events" }), c.eventList, status);
+  c.root = el("section", { className: "card" }, sections);
+
+  c.update = (r) => {
+    c.dot.className = "dot" + (r.online ? " on" : "");
+    c.meta.textContent = (r.online ? "online" : "offline, seen " + ago(r.last_seen)) + (r.model ? " · " + r.model : "");
+    const keys = Object.keys(r.telemetry).sort();
+    c.table.replaceChildren(...(keys.length ? keys.map((k) => {
+      const [label, unit] = TELEMETRY_LABELS[k] || [k, ""];
+      const v = k === "charging" ? (r.telemetry[k] ? "yes" : "no") : r.telemetry[k] + unit;
+      return el("tr", {}, [el("td", { textContent: label }), el("td", { textContent: v })]);
+    }) : [el("tr", {}, [el("td", { className: "empty", textContent: "No telemetry yet." })])]));
+    // Follow the robot's reported values, except while the user drags a slider.
+    for (const [key, s] of Object.entries(c.sliders || {})) {
+      if (key in r.telemetry && !c.dragging.has(key)) {
+        s.input.value = Math.round(r.telemetry[key]);
+        s.value.textContent = s.input.value + s.unit;
+      }
+    }
+    c.root.querySelectorAll("button, input").forEach((e) => { e.disabled = !r.online; });
+    if (c.pingBtn) c.pingBtn.disabled = !r.online || c.pinging;
+  };
+  c.addEvent = (ev) => {
+    c.events.unshift(new Date(ev.ts).toLocaleTimeString() + "  " + ev.name.replaceAll("_", " "));
+    c.events.length = Math.min(c.events.length, 8);
+    c.eventList.replaceChildren(...c.events.map((t) => el("li", { textContent: t })));
+  };
+  return c;
+}
+
+function upsert(r) {
+  let c = cards.get(r.id);
+  if (!c) {
+    c = makeCard(r);
+    cards.set(r.id, c);
+    const ids = [...cards.keys()].sort();
+    list.replaceChildren(...ids.map((id) => cards.get(id).root));
+  }
+  c.robot = r;
+  c.update(r);
+  empty.hidden = cards.size > 0;
 }
 
 function connect() {
   const es = new EventSource("/api/events");
   es.addEventListener("open", () => { connLine.textContent = "Live"; });
-  es.addEventListener("robot", (ev) => {
-    const r = JSON.parse(ev.data);
-    robots.set(r.id, r);
-    render();
+  es.addEventListener("robot", (ev) => upsert(JSON.parse(ev.data)));
+  es.addEventListener("pong", (ev) => {
+    const p = JSON.parse(ev.data);
+    const pending = pendingPings.get(p.id);
+    if (pending) {
+      pendingPings.delete(p.id);
+      pending.resolve({ ...p, total: performance.now() - pending.t0 });
+    }
+  });
+  es.addEventListener("robot_event", (ev) => {
+    const e = JSON.parse(ev.data);
+    const c = cards.get(e.robot);
+    if (c) c.addEvent(e);
   });
   es.addEventListener("error", () => { connLine.textContent = "Reconnecting…"; });
 }
 
-render();
+empty.hidden = false;
 connect();
-setInterval(render, 5000); // refresh "seen … ago"
+// Refresh "seen … ago" for offline robots.
+setInterval(() => { for (const c of cards.values()) if (c.robot && !c.robot.online) c.update(c.robot); }, 5000);
 </script>
 </body>
 </html>

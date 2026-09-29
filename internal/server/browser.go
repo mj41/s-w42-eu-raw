@@ -6,6 +6,7 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -58,7 +59,8 @@ func (s *Server) handleListRobots(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.pairedViews(s.session(w, r)))
 }
 
-// handleEvents streams robot state as SSE: one full robotView per "robot" event.
+// handleEvents streams SSE: "robot" (full robotView), "pong" (only to the
+// browser that sent the ping) and "robot_event".
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	session := s.session(w, r)
 	flusher, ok := w.(http.Flusher)
@@ -70,7 +72,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	sub := &subscriber{session: session, events: make(chan robotView, 16)}
+	sub := &subscriber{session: session, events: make(chan sseEvent, 32)}
 	s.mu.Lock()
 	s.subs[sub] = struct{}{}
 	s.mu.Unlock()
@@ -80,16 +82,15 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 	}()
 
-	send := func(v robotView) bool {
-		b, _ := json.Marshal(v)
-		if _, err := fmt.Fprintf(w, "event: robot\ndata: %s\n\n", b); err != nil {
+	send := func(ev sseEvent) bool {
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.name, ev.data); err != nil {
 			return false
 		}
 		flusher.Flush()
 		return true
 	}
 	for _, v := range s.pairedViews(session) {
-		if !send(v) {
+		if !send(sseEvent{name: "robot", data: mustJSON(v)}) {
 			return
 		}
 	}
@@ -102,8 +103,8 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case v := <-sub.events:
-			if !send(v) {
+		case ev := <-sub.events:
+			if !send(ev) {
 				return
 			}
 		case <-keepalive.C:
@@ -153,14 +154,29 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if cmd.Command == "ping" {
+		pingID, _ := cmd.Args["id"].(string)
+		if !pingIDPattern.MatchString(pingID) {
+			http.Error(w, "ping needs args.id: 1-32 letters or digits", http.StatusBadRequest)
+			return
+		}
+		s.startPing(id, pingID, session)
+	}
+
 	f, err := wire.Marshal(wire.KindRobotCommand, wire.Meta{WorkerID: id}, cmd)
 	if err != nil || !conn.enqueue(f) {
 		http.Error(w, "robot is not accepting commands", http.StatusServiceUnavailable)
 		return
 	}
-	s.log.Info("command sent", "robot", id, "command", cmd.Command)
+	if cmd.Command == "ping" {
+		s.log.Debug("command sent", "robot", id, "command", cmd.Command)
+	} else {
+		s.log.Info("command sent", "robot", id, "command", cmd.Command)
+	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "sent"})
 }
+
+var pingIDPattern = regexp.MustCompile(`^[A-Za-z0-9]{1,32}$`)
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")

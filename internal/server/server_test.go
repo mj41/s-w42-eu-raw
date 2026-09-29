@@ -49,7 +49,7 @@ func connectRobot(t *testing.T, ts *httptest.Server, id string, class string) *t
 	r := &testRobot{t: t, ws: ws}
 	r.send(wire.KindRegister, wire.RegisterBody{
 		Class:        class,
-		Capabilities: wire.RobotCapabilities{Model: "test", Commands: []string{"nod"}},
+		Capabilities: wire.RobotCapabilities{Model: "test", Commands: []string{"nod", "ping"}},
 	})
 	return r
 }
@@ -212,7 +212,7 @@ func TestSecureCookieBehindTLSGateway(t *testing.T) {
 		secure    bool
 	}{
 		{"https://chan.example.com", true},
-		{"http://192.168.0.18:8765", false},
+		{"http://192.168.1.10:8765", false},
 	} {
 		s := New(Config{RobotToken: testToken, PublicURL: tc.publicURL, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
 		rec := httptest.NewRecorder()
@@ -249,13 +249,14 @@ func postCommand(t *testing.T, c *http.Client, ts *httptest.Server, id, command 
 	return resp.StatusCode
 }
 
-func waitFor(t *testing.T, events <-chan robotView, what string, match func(robotView) bool) {
+func waitFor(t *testing.T, events <-chan sseMsg, what string, match func(robotView) bool) {
 	t.Helper()
 	deadline := time.After(3 * time.Second)
 	for {
 		select {
-		case v := <-events:
-			if match(v) {
+		case m := <-events:
+			var v robotView
+			if m.name == "robot" && json.Unmarshal(m.data, &v) == nil && match(v) {
 				return
 			}
 		case <-deadline:
@@ -264,8 +265,34 @@ func waitFor(t *testing.T, events <-chan robotView, what string, match func(robo
 	}
 }
 
-// openEvents streams decoded "robot" SSE events until the test ends.
-func openEvents(t *testing.T, c *http.Client, ts *httptest.Server) <-chan robotView {
+// sseMsg is one received Server-Sent Event.
+type sseMsg struct {
+	name string
+	data []byte
+}
+
+// waitForEvent waits for an SSE event of the given name and decodes it.
+func waitForEvent(t *testing.T, events <-chan sseMsg, name string) map[string]any {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case m := <-events:
+			if m.name == name {
+				var v map[string]any
+				if err := json.Unmarshal(m.data, &v); err != nil {
+					t.Fatal(err)
+				}
+				return v
+			}
+		case <-deadline:
+			t.Fatalf("no %q event reached the browser", name)
+		}
+	}
+}
+
+// openEvents streams SSE events until the test ends.
+func openEvents(t *testing.T, c *http.Client, ts *httptest.Server) <-chan sseMsg {
 	t.Helper()
 	req, _ := http.NewRequest("GET", ts.URL+"/api/events", nil)
 	stream := &http.Client{Jar: c.Jar} // no timeout: the stream stays open
@@ -275,20 +302,21 @@ func openEvents(t *testing.T, c *http.Client, ts *httptest.Server) <-chan robotV
 	}
 	t.Cleanup(func() { resp.Body.Close() })
 
-	out := make(chan robotView, 64)
+	out := make(chan sseMsg, 64)
 	ready := make(chan struct{})
 	go func() {
 		sc := bufio.NewScanner(resp.Body)
+		name := ""
 		for sc.Scan() {
 			line := sc.Text()
 			if line == ": ready" {
 				close(ready)
 			}
+			if n, ok := strings.CutPrefix(line, "event: "); ok {
+				name = n
+			}
 			if data, ok := strings.CutPrefix(line, "data: "); ok {
-				var v robotView
-				if json.Unmarshal([]byte(data), &v) == nil {
-					out <- v
-				}
+				out <- sseMsg{name: name, data: []byte(data)}
 			}
 		}
 	}()
@@ -298,4 +326,74 @@ func openEvents(t *testing.T, c *http.Client, ts *httptest.Server) <-chan robotV
 		t.Fatal("SSE stream not ready")
 	}
 	return out
+}
+
+// pairBrowser scans the robot's current QR code with a fresh browser.
+func pairBrowser(t *testing.T, robot *testRobot) *http.Client {
+	t.Helper()
+	var pc wire.PairCodeBody
+	robot.expect(wire.KindPairCode, &pc)
+	browser := newBrowser()
+	resp, err := browser.Get(pc.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	return browser
+}
+
+func postBody(t *testing.T, c *http.Client, ts *httptest.Server, id, body string) int {
+	t.Helper()
+	resp, err := c.Post(ts.URL+"/api/robots/"+id+"/command", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+func TestPingAndRobotEvents(t *testing.T) {
+	ts, _ := newTestServer(t)
+	robot := connectRobot(t, ts, "chan-1", wire.ClassRobot)
+	a := pairBrowser(t, robot)
+	b := pairBrowser(t, robot) // the used code was replaced, so b scans a fresh one
+	eventsA := openEvents(t, a, ts)
+	eventsB := openEvents(t, b, ts)
+
+	if code := postBody(t, a, ts, "chan-1", `{"command":"ping"}`); code != http.StatusBadRequest {
+		t.Fatalf("ping without id: status %d, want 400", code)
+	}
+	if code := postBody(t, a, ts, "chan-1", `{"command":"ping","args":{"id":"abc123"}}`); code != http.StatusAccepted {
+		t.Fatalf("ping: status %d, want 202", code)
+	}
+	var cmd wire.RobotCommandBody
+	robot.expect(wire.KindRobotCommand, &cmd)
+	if cmd.Command != "ping" || cmd.Args["id"] != "abc123" {
+		t.Fatalf("robot got %+v", cmd)
+	}
+	robot.send(wire.KindRobotPong, wire.RobotPongBody{ID: "abc123", QueueMs: 1.5})
+
+	pong := waitForEvent(t, eventsA, "pong")
+	if pong["id"] != "abc123" || pong["robot_queue_ms"] != 1.5 || pong["server_robot_ms"].(float64) < 0 {
+		t.Fatalf("pong event %+v", pong)
+	}
+
+	// Robot events reach every paired browser; b never sees a's pong.
+	robot.send(wire.KindRobotEvent, wire.RobotEventBody{Name: "shake"})
+	for _, events := range []<-chan sseMsg{eventsA, eventsB} {
+		if ev := waitForEvent(t, events, "robot_event"); ev["name"] != "shake" || ev["robot"] != "chan-1" {
+			t.Fatalf("robot event %+v", ev)
+		}
+	}
+	for {
+		select {
+		case m := <-eventsB:
+			if m.name == "pong" {
+				t.Fatal("pong leaked to a browser that did not send the ping")
+			}
+			continue
+		default:
+		}
+		break
+	}
 }

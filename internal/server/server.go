@@ -12,6 +12,7 @@ import (
 	"crypto/subtle"
 	"embed"
 	"encoding/hex"
+	"encoding/json"
 	"log/slog"
 	"maps"
 	"net/http"
@@ -29,7 +30,7 @@ var uiFS embed.FS
 // Config configures a Server.
 type Config struct {
 	RobotToken string        // shared bearer token robots must present
-	PublicURL  string        // base URL browsers use, e.g. http://192.168.0.18:8765
+	PublicURL  string        // base URL browsers use, e.g. http://192.168.1.10:8765
 	PairTTL    time.Duration // lifetime of a pairing code
 	Log        *slog.Logger
 }
@@ -45,6 +46,7 @@ type Server struct {
 	codes    map[string]pairCode        // one-time pairing codes
 	sessions map[string]map[string]bool // browser session id -> paired robot ids
 	subs     map[*subscriber]struct{}   // open SSE streams
+	pings    map[string]pendingPing     // "robot/ping id" -> in-flight ping
 }
 
 type pairCode struct {
@@ -76,7 +78,13 @@ type robotView struct {
 
 type subscriber struct {
 	session string
-	events  chan robotView
+	events  chan sseEvent
+}
+
+// sseEvent is one Server-Sent Event: "robot" (full robotView), "pong" or "robot_event".
+type sseEvent struct {
+	name string
+	data []byte
 }
 
 func New(cfg Config) *Server {
@@ -93,6 +101,7 @@ func New(cfg Config) *Server {
 		codes:    map[string]pairCode{},
 		sessions: map[string]map[string]bool{},
 		subs:     map[*subscriber]struct{}{},
+		pings:    map[string]pendingPing{},
 	}
 }
 
@@ -207,16 +216,79 @@ func (s *Server) broadcast(id string) {
 	if st == nil {
 		return
 	}
-	v := s.view(st)
+	s.publish(id, "", sseEvent{name: "robot", data: mustJSON(s.view(st))})
+}
+
+// publish sends ev to SSE streams paired with robotID; with session set, only
+// to that browser session. Must be called with s.mu held.
+func (s *Server) publish(robotID, session string, ev sseEvent) {
 	for sub := range s.subs {
-		if !s.sessions[sub.session][id] {
+		if !s.sessions[sub.session][robotID] || (session != "" && sub.session != session) {
 			continue
 		}
 		select {
-		case sub.events <- v:
-		default: // slow browser; it gets the next full-state update
+		case sub.events <- ev:
+		default: // slow browser; robot state catches up with the next update
 		}
 	}
+}
+
+// robotEvent forwards something that happened on the robot to paired browsers.
+func (s *Server) robotEvent(id, name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.publish(id, "", sseEvent{name: "robot_event", data: mustJSON(map[string]any{
+		"robot": id, "name": name, "ts": time.Now(),
+	})})
+}
+
+/* ---------------------------------- ping ---------------------------------- */
+
+type pendingPing struct {
+	session string
+	sent    time.Time
+}
+
+const pingTimeout = 30 * time.Second
+
+// startPing remembers when a ping left the server and which browser sent it.
+func (s *Server) startPing(robotID, pingID, session string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	for k, p := range s.pings {
+		if now.Sub(p.sent) > pingTimeout {
+			delete(s.pings, k)
+		}
+	}
+	s.pings[robotID+"/"+pingID] = pendingPing{session: session, sent: now}
+}
+
+// finishPing answers the browser that sent the ping with the server <-> robot
+// round trip; the browser subtracts it from its own total.
+func (s *Server) finishPing(robotID string, pong wire.RobotPongBody) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := robotID + "/" + pong.ID
+	p, ok := s.pings[key]
+	if !ok {
+		return
+	}
+	delete(s.pings, key)
+	s.publish(robotID, p.session, sseEvent{name: "pong", data: mustJSON(map[string]any{
+		"robot":           robotID,
+		"id":              pong.ID,
+		"server_robot_ms": float64(time.Since(p.sent).Microseconds()) / 1000,
+		"robot_queue_ms":  pong.QueueMs,
+	})})
+}
+
+func mustJSON(v any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err) // only called with plain maps and structs
+	}
+	return b
 }
 
 /* --------------------------------- pairing -------------------------------- */
