@@ -42,8 +42,13 @@
                      border: 1px solid var(--border); background: var(--bg); color: var(--text); }
   input[type=color] { width: 48px; height: 40px; border: 1px solid var(--border); border-radius: 10px;
                       background: var(--bg); padding: 2px; }
-  label.slider { display: grid; grid-template-columns: 5.5em 1fr 3.5em; align-items: center; gap: 8px; width: 100%; }
-  label.slider span:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  .axes { display: grid; gap: 14px; margin-top: 10px; }
+  .axis-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+  .axis-value { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .axis-row { display: flex; align-items: center; gap: 6px; }
+  .axis-row input[type=range] { flex: 1; min-width: 60px; }
+  button.chip { flex: none; padding: 8px 0; min-width: 40px; border-radius: 999px; background: var(--soft);
+                color: var(--text); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
   input[type=range] { width: 100%; accent-color: var(--accent); }
   .muted { color: var(--muted); font-size: 0.9rem; }
   .stats { font-variant-numeric: tabular-nums; }
@@ -138,7 +143,7 @@ function stat(values) {
 const ms = (x) => x.toFixed(x < 10 ? 1 : 0) + " ms";
 
 function makeCard(r) {
-  const c = { id: r.id, dragging: new Set(), events: [] };
+  const c = { id: r.id, events: [] };
   const has = (cmd) => r.commands.includes(cmd);
   const status = el("div", { className: "status" });
   const say = (text) => { status.textContent = text; };
@@ -206,19 +211,34 @@ function makeCard(r) {
     }
   }
 
-  const slider = (label, min, max, key, unit, onValue, live) => {
-    const input = el("input", { type: "range", min, max, value: Math.round((min + max) / 2) });
-    const value = el("span", { textContent: input.value + unit });
+  // A slider with −/+ chips. It holds the value the user chose ("target") and
+  // shows the robot's reported value as "now …"; it follows the robot again
+  // only after a few seconds without user input (servos need time to arrive).
+  const slider = (label, min, max, key, unit, onValue, { live = false, steps = [], showNow = false } = {}) => {
+    const input = el("input", { type: "range", min, max, value: Math.round((min + max) / 2), ariaLabel: label });
+    const value = el("span", { className: "axis-value", textContent: input.value + unit });
+    const now = el("span", { className: "muted" });
+    const s = { input, value, now, unit, touched: 0, showNow };
     let timer = 0;
-    input.oninput = () => {
-      value.textContent = input.value + unit;
-      c.dragging.add(key);
-      if (live) { clearTimeout(timer); timer = setTimeout(() => onValue(+input.value), 120); }
+    const set = (v, send) => {
+      v = Math.max(min, Math.min(max, Math.round(v)));
+      input.value = v;
+      value.textContent = v + unit;
+      s.touched = Date.now();
+      if (send) { clearTimeout(timer); timer = setTimeout(() => onValue(v), 120); }
     };
-    input.onchange = () => { c.dragging.delete(key); clearTimeout(timer); onValue(+input.value); };
+    input.oninput = () => set(+input.value, live);
+    input.onchange = () => set(+input.value, true);
+    const chip = (step) => el("button", { className: "chip", textContent: (step > 0 ? "+" : "−") + Math.abs(step),
+      ariaLabel: `${label} ${step > 0 ? "+" : "−"}${Math.abs(step)}${unit}`, onclick: () => set(+input.value + step, true) });
     c.sliders = c.sliders || {};
-    c.sliders[key] = { input, value, unit };
-    return el("label", { className: "slider" }, [el("span", { textContent: label }), input, value]);
+    c.sliders[key] = s;
+    return el("div", { className: "axis" }, [
+      el("div", { className: "axis-head" }, [el("span", { textContent: label }), el("span", {}, [value, " ", now])]),
+      el("div", { className: "axis-row" }, [
+        ...steps.filter((x) => x < 0).map(chip), input, ...steps.filter((x) => x > 0).map(chip),
+      ]),
+    ]);
   };
 
   if (has("nod") || has("shake") || has("home") || has("look")) {
@@ -227,9 +247,10 @@ function makeCard(r) {
       el("button", { textContent: cmd, onclick: () => run(cmd) }))));
     if (has("look")) {
       const look = () => run("look", { yaw: +c.sliders.head_yaw_deg.input.value, pitch: +c.sliders.head_pitch_deg.input.value }, "look");
-      sections.push(el("div", { className: "row", style: "margin-top:8px" }, [
-        slider("Yaw", -128, 128, "head_yaw_deg", "°", look, true),
-        slider("Pitch", 3, 87, "head_pitch_deg", "°", look, true),
+      const head = { live: true, steps: [-15, -5, 5, 15], showNow: true };
+      sections.push(el("div", { className: "axes" }, [
+        slider("Yaw", -128, 128, "head_yaw_deg", "°", look, head),
+        slider("Pitch", 3, 87, "head_pitch_deg", "°", look, head),
       ]));
     }
   }
@@ -250,9 +271,10 @@ function makeCard(r) {
   if (has("brightness") || has("volume")) {
     sections.push(el("h2", { textContent: "Settings" }));
     const rows = [];
-    if (has("brightness")) rows.push(slider("Brightness", 1, 100, "brightness_pct", "%", (v) => run("brightness", { value: v }, "brightness"), false));
-    if (has("volume")) rows.push(slider("Volume", 0, 100, "volume_pct", "%", (v) => run("volume", { value: v }, "volume"), false));
-    sections.push(el("div", { className: "row" }, rows));
+    const setting = { steps: [-10, 10] };
+    if (has("brightness")) rows.push(slider("Brightness", 1, 100, "brightness_pct", "%", (v) => run("brightness", { value: v }, "brightness"), setting));
+    if (has("volume")) rows.push(slider("Volume", 0, 100, "volume_pct", "%", (v) => run("volume", { value: v }, "volume"), setting));
+    sections.push(el("div", { className: "axes" }, rows));
   }
 
   if (has("sticker") || has("image") || has("face")) {
@@ -365,11 +387,15 @@ function makeCard(r) {
       const v = k === "charging" || k === "screensaver" ? (r.telemetry[k] ? "yes" : "no") : r.telemetry[k] + unit;
       return el("tr", {}, [el("td", { textContent: label }), el("td", { textContent: v })]);
     }) : [el("tr", {}, [el("td", { className: "empty", textContent: "No telemetry yet." })])]));
-    // Follow the robot's reported values, except while the user drags a slider.
+    // Show the robot's reported value; follow it only when the user hasn't
+    // touched the slider for a while, so it doesn't jump back mid-move.
     for (const [key, s] of Object.entries(c.sliders || {})) {
-      if (key in r.telemetry && !c.dragging.has(key)) {
-        s.input.value = Math.round(r.telemetry[key]);
-        s.value.textContent = s.input.value + s.unit;
+      if (!(key in r.telemetry)) continue;
+      const reported = Math.round(r.telemetry[key]);
+      if (s.showNow) s.now.textContent = `· now ${reported}${s.unit}`;
+      if (Date.now() - s.touched > 4000) {
+        s.input.value = reported;
+        s.value.textContent = reported + s.unit;
       }
     }
     c.root.querySelectorAll("button, input").forEach((e) => { e.disabled = !r.online; });
