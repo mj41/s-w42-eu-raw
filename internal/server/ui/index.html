@@ -133,6 +133,7 @@ const SENSOR_LABELS = {
   yaw_load_pct: ["Yaw servo load", "%"], pitch_load_pct: ["Pitch servo load", "%"],
   yaw_temp_c: ["Yaw servo temp", " °C"], pitch_temp_c: ["Pitch servo temp", " °C"],
   servo_voltage_v: ["Servo supply", " V"], chip_temp_c: ["Chip temp", " °C"],
+  light_lux: ["Light", " lux"], proximity: ["Proximity", " (0–2047)"],
 };
 
 function el(tag, props = {}, children = []) {
@@ -385,6 +386,16 @@ function makeCard(r) {
     if (has("brightness")) rows.push(slider("Brightness", 1, 100, "brightness_pct", "%", (v) => run("brightness", { value: v }, "brightness"), setting));
     if (has("volume")) rows.push(slider("Volume", 0, 100, "volume_pct", "%", (v) => run("volume", { value: v }, "volume"), setting));
     sections.push(el("div", { className: "axes" }, rows));
+    if (has("brightness")) {
+      // Shown once the robot reports auto_brightness (it has a light sensor). Moving
+      // the slider sets brightness by hand, which the robot treats as "auto off".
+      c.autoBright = el("input", { type: "checkbox" });
+      c.autoBright.onchange = () => {
+        c.autoTouched = Date.now();
+        run("brightness", { auto: c.autoBright.checked }, "auto brightness " + (c.autoBright.checked ? "on" : "off"));
+      };
+      sections.push(c.autoLabel = el("label", { className: "check muted", hidden: true }, [c.autoBright, "Auto brightness from the room light"]));
+    }
   }
 
   if (has("sticker") || has("image") || has("face")) {
@@ -605,6 +616,10 @@ function makeCard(r) {
     const keys = Object.keys(r.telemetry).filter((k) => !(k in SENSOR_LABELS)).sort();
     const sensorKeys = Object.keys(SENSOR_LABELS).filter((k) => k in r.telemetry);
     c.sensorHead.hidden = c.sensorTable.hidden = !sensorKeys.length;
+    if (c.autoLabel && "auto_brightness" in r.telemetry) {
+      c.autoLabel.hidden = false;
+      if (Date.now() - (c.autoTouched || 0) > 4000) c.autoBright.checked = r.telemetry.auto_brightness > 0;
+    }
     c.sensorTable.replaceChildren(...sensorKeys.map((k) => {
       const [label, unit] = SENSOR_LABELS[k];
       return el("tr", {}, [el("td", { textContent: label }), el("td", { textContent: r.telemetry[k] + unit })]);
@@ -644,6 +659,7 @@ function makeCard(r) {
       : "manual" in d ? (d.manual ? " (manual)" : " (auto)")
       : "z0" in d ? ` (zones ${d.z0}·${d.z1}·${d.z2})`
       : "ms" in d ? ` (${d.ms} ms)`
+      : "value" in d ? ` (${d.value})`
       : "uid" in d ? ` ${d.uid}` + (d.type ? ` (${d.type.replaceAll("_", " ")})` : "") + (d.text ? ` “${d.text}”` : "")
       : "";
     c.events.unshift(new Date(ev.ts).toLocaleTimeString() + "  " + ev.name.replaceAll("_", " ") + where);

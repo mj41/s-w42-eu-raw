@@ -98,7 +98,7 @@ type PairedBody struct {
 //	leds       {"left": "#rrggbb", "right": "#rrggbb"}  fade a side; also
 //	           {"pixels": ["#rrggbb" or null, ...]}   12 single LEDs, left 0-5, right 6-11
 //	           {"effect": "rainbow|breathe|chase|blink|off", "color", "speed": 0.2..5, "seconds"}
-//	brightness {"value": 1..100}
+//	brightness {"value": 1..100} by hand (ends auto), or {"auto": bool} to follow the room light
 //	volume     {"value": 0..100}
 //	sticker    {"name": "heart|angry|sweat|shy|dizzy", "seconds": 3}  decoration over the face
 //	face                                       back to the face after a picture
@@ -119,7 +119,8 @@ type RobotCommandBody struct {
 // "head_release" with {"ms"}, "head_swipe_forward", "head_swipe_backward", "screen_tap"
 // with data {"x", "y"} in screen pixels (320x240), "nfc_tag" with data
 // {"uid", "type", "atqa", "sak", optional "text"} (the first NDEF record: URI
-// or text), "nfc_removed" with {"uid"}, and screensaver/standby events.
+// or text), "nfc_removed" with {"uid"}, "proximity_near" / "proximity_far"
+// with {"value"} (someone came close / left), and screensaver/standby events.
 type RobotEventBody struct {
 	Name string         `json:"name"`
 	Data map[string]any `json:"data,omitempty"`

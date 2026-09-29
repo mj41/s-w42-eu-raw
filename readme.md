@@ -22,7 +22,8 @@ For each paired robot:
 - **Camera & mic:** live video (JPEG, about 5 fps) and the robot's microphone, played through Web Audio. The robot streams only while someone watches or listens, and shows a red LIVE badge meanwhile.
 - **Speaker:** "Hold to talk" streams your microphone to the robot, "Play sound file" plays any audio file the browser can decode, and "Beep" is a test tone. Audio is resampled to 24 kHz in the browser and the robot's mouth moves while it plays. Talking needs a secure page (`https://` or `http://localhost`); files and Beep work anywhere.
 - **NFC:** "Reader on" / "Reader off". While on (the default), holding a tag or card near the robot adds an `nfc tag` event with its UID and type. For NTAG stickers it also shows the first NDEF record (a URL or text). Taking it away adds `nfc removed`.
-- **Sensors:** a table fed by the robot's telemetry: acceleration per axis (g) and rotation rate, servo load and temperature, servo supply voltage, and chip temperature.
+- **Sensors:** a table fed by the robot's telemetry: acceleration per axis (g) and rotation rate, servo load and temperature, servo supply voltage, chip temperature, room light (lux) and proximity.
+- **Auto brightness** (under Settings, for robots with a light sensor): the robot sets its backlight from the room light. Moving the brightness slider switches it off.
 - **Events:** shake, head touch (press with the touched zones, release with its duration, swipe forward / back), screen taps with coordinates, NFC tags (UID, type, and the link or text stored on the tag), and screensaver on/off. The list sits right under Status. The server replays each robot's last 20 events when a browser connects, so a phone that was asleep still sees them.
 - **Screen & power** (right after Events): "Screensaver on" / "Screensaver off", and "Standby" for 1–60 min.
   - **Status** shows the screensaver as `off`, `auto` or `manual`.
@@ -80,7 +81,7 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 |---|---|---|
 | robot → server | `Register` (must be first) | `{"class": "robot", "capabilities": {"model", "firmware", "commands": [...], "measurements": [...]}}` |
 | robot → server | `RobotTelemetry` | `{"measurements": {"battery_pct": 87.5}}` (values are numbers) |
-| robot → server | `RobotEvent` | `{"name", "data"}`: `shake`, `head_press` with zone intensities `{"z0", "z1", "z2"}` (0–3), `head_release` with `{"ms"}`, `head_swipe_forward`, `head_swipe_backward`, `screen_tap` with `{"x", "y"}`, `screensaver_on` with `{"manual": 0 or 1}`, `screensaver_off`, `standby` with `{"minutes"}`, `standby_end` with `{"touched"}`, `nfc_tag` with `{"uid": "04:A2:…", "type", "atqa", "sak"}` plus `"text"` when the tag holds an NDEF URI or text record, `nfc_removed` with `{"uid"}`. Values are numbers or strings. Browsers also get a per-robot `seq` |
+| robot → server | `RobotEvent` | `{"name", "data"}`: `shake`, `head_press` with zone intensities `{"z0", "z1", "z2"}` (0–3), `head_release` with `{"ms"}`, `head_swipe_forward`, `head_swipe_backward`, `screen_tap` with `{"x", "y"}`, `screensaver_on` with `{"manual": 0 or 1}`, `screensaver_off`, `standby` with `{"minutes"}`, `standby_end` with `{"touched"}`, `nfc_tag` with `{"uid": "04:A2:…", "type", "atqa", "sak"}` plus `"text"` when the tag holds an NDEF URI or text record, `nfc_removed` with `{"uid"}`, `proximity_near` / `proximity_far` with `{"value"}`. Values are numbers or strings. Browsers also get a per-robot `seq` |
 | robot → server | `RobotPong` | `{"id", "queue_ms"}`: answer to `ping`; `queue_ms` is time spent waiting on the robot |
 | robot → server | `Heartbeat` | `{}`, every 30 s |
 | server → robot | `Accepted` / `Rejected` | `{}` / `{"reason": "..."}` |
@@ -105,7 +106,7 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 | `face` | none: back to the face after a picture |
 | `image` | capability only: pictures arrive as binary `0x10` |
 | `leds` | `{"left": "#rrggbb", "right": "#rrggbb"}` fades a whole side. `{"pixels": [...]}` sets up to 12 single LEDs (left 0–5, right 6–11; `null` skips one). `{"effect": "rainbow\|breathe\|chase\|blink\|off", "color", "speed": 0.2..5, "seconds"}` runs an animation on the robot (`seconds` 0 = until the next `leds`) |
-| `brightness` | `{"value": 1..100}` |
+| `brightness` | `{"value": 1..100}` sets it by hand and ends auto-brightness; `{"auto": bool}` switches brightness that follows the room light (robots with a light sensor report `auto_brightness`) |
 | `volume` | `{"value": 0..100}` |
 | `camera`, `mic` | `{"on": bool}`: sent by the server, not by browsers, while someone watches or listens |
 | `nfc` | `{"on": bool}`: NFC tag polling, on by default. Listed only when the robot found its reader |
