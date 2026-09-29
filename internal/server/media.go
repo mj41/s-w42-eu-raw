@@ -19,7 +19,10 @@ import (
 // least one paired browser watches or listens. Browsers get the same
 // messages over /api/robots/{id}/media.
 
-const maxPictureBytes = 192 << 10
+const (
+	maxPictureBytes  = 192 << 10
+	mediaStatsPeriod = 10 * time.Second
+)
 
 // mediaSub is one browser media WebSocket.
 type mediaSub struct {
@@ -28,6 +31,8 @@ type mediaSub struct {
 	video   bool
 	audio   bool
 	out     chan []byte
+	sent    int // written by handleMedia
+	dropped int // under Server.mu
 }
 
 // Browsers send the session cookie with the WebSocket handshake, so only
@@ -49,6 +54,14 @@ func (s *Server) relayMedia(robotID string, msg []byte) {
 	kind := msg[0]
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if st := s.robots[robotID]; st != nil && (kind == wire.BinCameraJPEG || kind == wire.BinAudioPCM) {
+		i := 0
+		if kind == wire.BinAudioPCM {
+			i = 1
+		}
+		st.mediaFrames[i]++
+		st.mediaBytes[i] += len(msg)
+	}
 	for sub := range s.media {
 		if sub.robot != robotID || (kind == wire.BinCameraJPEG && !sub.video) || (kind == wire.BinAudioPCM && !sub.audio) {
 			continue
@@ -56,6 +69,7 @@ func (s *Server) relayMedia(robotID string, msg []byte) {
 		select {
 		case sub.out <- msg:
 		default: // slow browser: drop this frame rather than delay the next ones
+			sub.dropped++
 		}
 	}
 }
@@ -123,7 +137,10 @@ func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
 		delete(s.media, sub)
 		s.syncMedia(id)
 		s.mu.Unlock()
-		s.log.Info("media viewer left", "robot", id)
+		s.mu.Lock()
+		dropped := sub.dropped
+		s.mu.Unlock()
+		s.log.Info("media viewer left", "robot", id, "sent", sub.sent, "dropped", dropped)
 	}()
 
 	// The browser may send speaker audio (BinSpeakerPCM); reading also detects
@@ -156,8 +173,10 @@ func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
 		case msg := <-sub.out:
 			ws.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := ws.WriteMessage(websocket.BinaryMessage, msg); err != nil {
+				s.log.Info("media viewer write failed", "robot", id, "err", err)
 				return
 			}
+			sub.sent++
 		case <-ping.C:
 			if err := ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(writeWait)); err != nil {
 				return
@@ -226,3 +245,38 @@ func (s *Server) forwardSpeaker(robotID string, msg []byte) bool {
 	s.mu.Unlock()
 	return conn != nil && conn.enqueueBinary(msg)
 }
+
+// logMediaStats logs what the robot streamed during the last period while the
+// camera or microphone is on, and warns when a stream is on but nothing came.
+func (s *Server) logMediaStats(robotID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := s.robots[robotID]
+	if st == nil {
+		return
+	}
+	if st.mediaStatsAt.IsZero() { // first check: start the first period now
+		st.mediaStatsAt = time.Now()
+		return
+	}
+	elapsed := time.Since(st.mediaStatsAt)
+	if elapsed < mediaStatsPeriod {
+		return
+	}
+	frames, bytes := st.mediaFrames, st.mediaBytes
+	st.mediaFrames, st.mediaBytes, st.mediaStatsAt = [2]int{}, [2]int{}, time.Now()
+	if !st.cameraOn && !st.micOn && frames == [2]int{} {
+		return
+	}
+	secs := elapsed.Seconds()
+	attrs := []any{"robot", robotID, "camera", st.cameraOn, "mic", st.micOn,
+		"video_fps", round1(float64(frames[0]) / secs), "video_kbps", round1(float64(bytes[0]) / 1024 / secs),
+		"audio_msgs", frames[1], "audio_kbps", round1(float64(bytes[1]) / 1024 / secs)}
+	if (st.cameraOn && frames[0] == 0) || (st.micOn && frames[1] == 0) {
+		s.log.Warn("media stalled: robot sends nothing for a stream that is on", attrs...)
+		return
+	}
+	s.log.Info("media from robot", attrs...)
+}
+
+func round1(v float64) float64 { return float64(int(v*10+0.5)) / 10 }

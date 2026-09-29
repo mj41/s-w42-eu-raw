@@ -75,6 +75,9 @@ type robotState struct {
 	// From the robot's "standby" event: when it plans to reconnect.
 	standbyUntil time.Time
 	micOn        bool
+	// Media received from the robot since mediaStatsAt: [0] camera, [1] microphone.
+	mediaFrames, mediaBytes [2]int
+	mediaStatsAt            time.Time
 }
 
 // robotView is the browser-facing JSON for one robot.

@@ -181,6 +181,7 @@ func (s *Server) writeLoop(c *robotConn) {
 				c.close()
 				return
 			}
+			s.logMediaStats(c.id)
 		case <-rotate.C:
 			s.sendPairCode(c)
 		}

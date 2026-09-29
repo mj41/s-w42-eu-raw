@@ -434,7 +434,8 @@ function makeCard(r) {
   }
 
   if (has("camera") || has("mic")) {
-    const media = { ws: null, video: false, audio: false, frames: 0, bytes: 0, audioCtx: null, playAt: 0, lastUrl: "" };
+    const media = { ws: null, video: false, audio: false, frames: 0, bytes: 0, audioCtx: null, playAt: 0, lastUrl: "",
+      lastVideoAt: 0, lastAudioAt: 0, openedAt: 0 };
     const img = el("img", { alt: "Robot camera", hidden: true,
       style: "width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:10px;background:#000;margin-top:8px" });
     const info = el("div", { className: "muted stats" });
@@ -473,27 +474,61 @@ function makeCard(r) {
         media.bytes += u8.length;
         if (u8[0] === 0x01) {
           media.frames++;
+          media.lastVideoAt = Date.now();
           const url = URL.createObjectURL(new Blob([u8.subarray(1)], { type: "image/jpeg" }));
           img.src = url;
           if (media.lastUrl) URL.revokeObjectURL(media.lastUrl);
           media.lastUrl = url;
         } else if (u8[0] === 0x02 && media.audioCtx) {
+          media.lastAudioAt = Date.now();
           playPcm(u8.subarray(1));
         }
       };
-      ws.onclose = () => { if (media.ws === ws) { info.textContent = "Media stream closed"; } };
+      // Phones drop sockets when the screen sleeps or the tab is in the background:
+      // reconnect while video or audio is still wanted.
+      ws.onclose = () => {
+        if (media.ws !== ws) return;
+        info.textContent = "Stream closed, reconnecting…";
+        setTimeout(() => { if (media.ws === ws) reopen(); }, 2000);
+      };
       media.ws = ws;
+      media.openedAt = media.lastVideoAt = media.lastAudioAt = Date.now();
       info.textContent = "Waiting for the robot…";
     };
+    const startAudio = () => {
+      if (media.audio && media.audioCtx && media.audioCtx.state !== "running") media.audioCtx.resume().catch(() => {});
+    };
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) return;
+      startAudio();
+      if ((media.video || media.audio) && (!media.ws || media.ws.readyState > WebSocket.OPEN)) reopen();
+    });
+    info.onclick = startAudio; // the browser may keep audio paused until a tap
     watch.onclick = () => { media.video = !media.video; reopen(); };
     listen.onclick = () => {
       media.audio = !media.audio;
-      if (media.audio && !media.audioCtx) media.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      if (media.audioCtx) media.audioCtx.resume();
+      if (media.audio && !media.audioCtx) {
+        media.audioCtx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "playback" });
+      }
+      if (media.audio) {
+        // Mobile browsers start audio only from a tap: resume and play one silent sample right here.
+        media.audioCtx.resume().catch(() => {});
+        const silent = media.audioCtx.createBufferSource();
+        silent.buffer = media.audioCtx.createBuffer(1, 1, 22050);
+        silent.connect(media.audioCtx.destination);
+        silent.start();
+      }
       reopen();
     };
     setInterval(() => {
-      if (media.ws) info.textContent = `${media.video ? media.frames + " fps · " : ""}${Math.round(media.bytes / 1024)} KB/s`;
+      if (media.ws && media.ws.readyState === WebSocket.OPEN) {
+        const now = Date.now(), notes = [];
+        if (media.video && now - media.lastVideoAt > 5000) notes.push(`no video for ${Math.round((now - media.lastVideoAt) / 1000)} s`);
+        if (media.audio && now - media.lastAudioAt > 5000) notes.push(`no audio for ${Math.round((now - media.lastAudioAt) / 1000)} s`);
+        if (media.audio && media.audioCtx && media.audioCtx.state !== "running") notes.push(`audio ${media.audioCtx.state}: tap here`);
+        info.textContent = `${media.video ? media.frames + " fps · " : ""}${Math.round(media.bytes / 1024)} KB/s` +
+          (notes.length ? " · " + notes.join(" · ") : "");
+      }
       media.frames = 0;
       media.bytes = 0;
     }, 1000);
