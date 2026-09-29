@@ -21,9 +21,12 @@ For each paired robot:
 - **Screen:** stickers over the face (heart, angry, sweat, shy, dizzy), or a picture from the phone. The picture is scaled to 320x240 in the browser and replaces the face until "Face".
 - **Camera & mic:** live video (JPEG, about 5 fps) and the robot's microphone, played through Web Audio. The robot streams only while someone watches or listens, and shows a red LIVE badge meanwhile.
 - **Events:** shake, head touch (press / swipe forward / swipe back), screen taps with coordinates, and screensaver on/off. The list sits right under Status. The server replays each robot's last 20 events when a browser connects, so a phone that was asleep still sees them.
-- **Screensaver:** "Blank" and "Wake" buttons. Status shows `off`, `auto` or `manual`.
-  - **Auto:** the robot blanks after 60 s (firmware option) without touch **and** without commands or live media. Using it remotely keeps it awake, and touch or a command wakes it.
-  - **Manual:** a **double tap** on the robot or the `screensaver` command. It stays blank until a touch or "Wake".
+- **Screen & power** (right after Events): "Screensaver on" / "Screensaver off", and "Standby" for 1–60 min.
+  - **Status** shows the screensaver as `off`, `auto` or `manual`.
+  - **Auto:** the robot blanks after 60 s (firmware option) without touch **and** without commands or live media, so using it remotely keeps it awake.
+  - **Manual:** a **double tap** on the robot or "Screensaver on". The robot keeps it until a touch or "Screensaver off".
+  - **Commands wake the screen** (checkbox, on by default): the dashboard follows every command (except ping), and every picture, with `screensaver off` when the screen is blank. The robot stays explicit; the browser decides.
+  - **Standby:** the robot tells the server, then goes offline with backlight, LEDs, camera and mic off. It comes back after the time or on a touch. Meanwhile the card shows "standby until HH:MM".
 
 Controls appear only for the commands a robot lists in its capabilities.
 
@@ -90,6 +93,7 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 | `nod`, `shake`, `home` | none |
 | `look` | `{"yaw": -128..128, "pitch": 5..85}` in degrees |
 | `screensaver` | `{"on": bool}`: blank the screen (manual) or wake it |
+| `standby` | `{"minutes": 1..120}`: the robot sends a `standby` event, goes offline, and reconnects after the time or on a touch (then sends `standby_end`). `/api/robots` shows `standby_until` while it is away |
 | `emotion` | `{"name": "neutral\|happy\|angry\|sad\|doubt\|sleepy"}` |
 | `say` | `{"text", "seconds"}`: speech bubble |
 | `sticker` | `{"name": "heart\|angry\|sweat\|shy\|dizzy", "seconds"}`: decoration over the face |

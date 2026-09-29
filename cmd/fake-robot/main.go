@@ -28,7 +28,7 @@ import (
 
 // Same command set as the firmware (see wire.RobotCommandBody).
 var commands = []string{"ping", "nod", "shake", "look", "home", "emotion", "say", "leds", "brightness", "volume",
-	"sticker", "face", "image", "camera", "mic", "screensaver"}
+	"sticker", "face", "image", "camera", "mic", "screensaver", "standby"}
 
 func main() {
 	var (
@@ -55,6 +55,14 @@ func main() {
 	for {
 		start := time.Now()
 		err := r.run(url, token, *id, *interval, *events)
+		var sb standbyError
+		if errors.As(err, &sb) {
+			log.Info("standby: offline", "for", sb.d)
+			time.Sleep(sb.d)
+			r.afterStandby = true
+			backoff = time.Second
+			continue
+		}
 		log.Warn("disconnected", "err", err)
 		if time.Since(start) > time.Minute {
 			backoff = time.Second
@@ -71,6 +79,7 @@ type robot struct {
 	brightness, volume  float64
 	cameraOn, micOn     bool
 	screensaver         float64 // 0 off, 1 auto, 2 manual
+	afterStandby        bool    // report standby_end after the next connect
 	frame               int     // camera frames sent, drives the test pattern
 	phase               float64 // microphone tone phase
 	log                 *slog.Logger
@@ -114,6 +123,12 @@ func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) e
 	}
 	if err := send(wire.KindRegister, reg); err != nil {
 		return err
+	}
+	if r.afterStandby {
+		r.afterStandby, r.screensaver = false, 0
+		if err := send(wire.KindRobotEvent, wire.RobotEventBody{Name: "standby_end", Data: map[string]any{"touched": 0}}); err != nil {
+			return err
+		}
 	}
 
 	// gorilla allows one concurrent writer: the reader hands commands to this loop.
@@ -192,6 +207,18 @@ func (r *robot) handle(c received, send func(string, any) error) error {
 		}
 	case "home":
 		r.yaw, r.pitch = 0, 45
+	case "standby":
+		// Like the firmware: report it, then go offline for the given minutes
+		// (fractions allowed here, for quick tests with curl).
+		minutes, ok := num("minutes")
+		if !ok || minutes <= 0 {
+			minutes = 5
+		}
+		r.cameraOn, r.micOn, r.screensaver = false, false, 2
+		if err := send(wire.KindRobotEvent, wire.RobotEventBody{Name: "standby", Data: map[string]any{"minutes": minutes}}); err != nil {
+			return err
+		}
+		return standbyError{time.Duration(minutes * float64(time.Minute))}
 	case "screensaver":
 		// Like the firmware: the command blanks "manually" (2) or wakes (0).
 		on, _ := c.cmd.Args["on"].(bool)
@@ -330,3 +357,8 @@ func (r *robot) micChunk(d time.Duration) []byte {
 	}
 	return out
 }
+
+// standbyError ends a connection on purpose: stay offline for d, then reconnect.
+type standbyError struct{ d time.Duration }
+
+func (e standbyError) Error() string { return fmt.Sprintf("standby for %v", e.d) }

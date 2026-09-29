@@ -66,7 +66,9 @@ type robotState struct {
 	cameraOn    bool       // what the server last asked the robot
 	events      []sseEvent // recent robot_event messages, oldest first
 	eventSeq    uint64
-	micOn       bool
+	// From the robot's "standby" event: when it plans to reconnect.
+	standbyUntil time.Time
+	micOn        bool
 }
 
 // robotView is the browser-facing JSON for one robot.
@@ -78,7 +80,9 @@ type robotView struct {
 	Commands    []string           `json:"commands"`
 	Telemetry   map[string]float64 `json:"telemetry"`
 	TelemetryAt *time.Time         `json:"telemetry_at,omitempty"`
-	LastSeen    time.Time          `json:"last_seen"`
+	// Set while the robot is offline because of the standby command.
+	StandbyUntil *time.Time `json:"standby_until,omitempty"`
+	LastSeen     time.Time  `json:"last_seen"`
 }
 
 type subscriber struct {
@@ -147,6 +151,7 @@ func (s *Server) attach(c *robotConn, reg wire.RegisterBody) {
 	st.lastSeen = time.Now()
 	// A fresh connection starts with camera and mic off (see handleRobotConnect).
 	st.cameraOn, st.micOn = false, false
+	st.standbyUntil = time.Time{} // back online
 	s.mu.Unlock()
 
 	if old != nil {
@@ -215,6 +220,10 @@ func (s *Server) view(st *robotState) robotView {
 		t := st.telemetryAt
 		v.TelemetryAt = &t
 	}
+	if st.conn == nil && time.Now().Before(st.standbyUntil) {
+		t := st.standbyUntil
+		v.StandbyUntil = &t
+	}
 	return v
 }
 
@@ -255,6 +264,11 @@ func (s *Server) robotEvent(id string, ev wire.RobotEventBody) {
 	st := s.robots[id]
 	if st == nil {
 		return
+	}
+	if ev.Name == "standby" {
+		if minutes, ok := ev.Data["minutes"].(float64); ok && minutes > 0 {
+			st.standbyUntil = time.Now().Add(time.Duration(minutes * float64(time.Minute)))
+		}
 	}
 	st.eventSeq++
 	msg := sseEvent{name: "robot_event", data: mustJSON(map[string]any{

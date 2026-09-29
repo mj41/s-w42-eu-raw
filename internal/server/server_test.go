@@ -516,3 +516,30 @@ func TestRobotEventsReplayedToLateBrowsers(t *testing.T) {
 		t.Fatalf("event data lost: %+v", first)
 	}
 }
+
+func TestStandbyShownWhileOffline(t *testing.T) {
+	ts, _ := newTestServer(t)
+	robot := connectRobot(t, ts, "chan-1", wire.ClassRobot)
+	browser := pairBrowser(t, robot)
+
+	robot.send(wire.KindRobotEvent, wire.RobotEventBody{Name: "standby", Data: map[string]any{"minutes": 5}})
+	time.Sleep(100 * time.Millisecond)
+	robot.ws.Close()
+	time.Sleep(200 * time.Millisecond)
+
+	views := listRobots(t, browser, ts)
+	if len(views) != 1 || views[0].Online || views[0].StandbyUntil == nil {
+		t.Fatalf("after standby: %+v", views)
+	}
+	if d := time.Until(*views[0].StandbyUntil); d < 4*time.Minute || d > 5*time.Minute {
+		t.Fatalf("standby_until in %v, want about 5 min", d)
+	}
+
+	// Reconnecting ends it.
+	back := connectRobot(t, ts, "chan-1", wire.ClassRobot)
+	var accepted struct{}
+	back.expect(wire.KindAccepted, &accepted)
+	if views := listRobots(t, browser, ts); !views[0].Online || views[0].StandbyUntil != nil {
+		t.Fatalf("after reconnect: %+v", views[0])
+	}
+}

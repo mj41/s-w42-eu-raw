@@ -56,6 +56,10 @@
   .events li { padding: 3px 0; border-top: 1px solid var(--border); }
   .status { color: var(--muted); font-size: 0.9rem; min-height: 1.4em; margin-top: 12px; }
   .empty { color: var(--muted); }
+  select.select { font: inherit; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--border);
+                  background: var(--bg); color: var(--text); }
+  label.check { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 0.9rem; }
+  label.check input { width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
 </style>
 </head>
 <body>
@@ -147,12 +151,26 @@ function makeCard(r) {
   const has = (cmd) => r.commands.includes(cmd);
   const status = el("div", { className: "status" });
   const say = (text) => { status.textContent = text; };
+  // Default browser behaviour: every command (and a picture) also wakes a blank
+  // screen. The robot itself keeps a manual blank until told otherwise; the
+  // "Commands wake the screen" box turns this off. Ping is only a measurement.
+  const NO_WAKE = new Set(["ping", "screensaver", "standby"]);
+  c.wakeOnCommand = el("input", { type: "checkbox", checked: true });
+  const wakeIfBlank = () => {
+    if (has("screensaver") && c.wakeOnCommand.checked && c.blank) {
+      c.blank = false; // don't send twice before the robot reports back
+      sendCommand(c.id, "screensaver", { on: false }).catch(() => {});
+    }
+  };
   const run = async (command, args, label) => {
     try {
       await sendCommand(c.id, command, args);
       say("Sent " + (label || command));
+      if (!NO_WAKE.has(command)) wakeIfBlank();
+      return true;
     } catch (err) {
       say("Failed: " + err.message);
+      return false;
     }
   };
 
@@ -164,6 +182,29 @@ function makeCard(r) {
     el("h2", { textContent: "Status" }), c.table,
     el("h2", { textContent: "Events" }), (c.eventList = el("ul", { className: "events" })),
   ];
+
+  if (has("screensaver") || has("standby")) {
+    sections.push(el("h2", { textContent: "Screen & power" }));
+    const row = [];
+    if (has("screensaver")) {
+      row.push(el("button", { className: "soft", textContent: "Screensaver on", onclick: () => run("screensaver", { on: true }, "screensaver on") }),
+        el("button", { className: "soft", textContent: "Screensaver off", onclick: () => run("screensaver", { on: false }, "screensaver off") }));
+    }
+    if (has("standby")) {
+      const minutes = el("select", { className: "select", ariaLabel: "Standby minutes" },
+        [1, 5, 15, 30, 60].map((m) => el("option", { value: m, textContent: m + " min", selected: m === 5 })));
+      row.push(el("button", { className: "soft", textContent: "Standby",
+        onclick: () => run("standby", { minutes: +minutes.value }, `standby for ${minutes.value} min`) }), minutes);
+    }
+    sections.push(el("div", { className: "row" }, row));
+    if (has("screensaver")) {
+      sections.push(el("label", { className: "check muted" }, [c.wakeOnCommand, "Commands wake the screen"]));
+    }
+    if (has("standby")) {
+      sections.push(el("div", { className: "muted", style: "font-size:0.85rem;margin-top:6px",
+        textContent: "Standby: the robot goes offline with its screen off and comes back after the time, or when someone touches it." }));
+    }
+  }
 
   if (has("ping")) {
     c.pingStats = el("div", { className: "stats muted", textContent: "Measures browser → server → robot and back." });
@@ -296,6 +337,7 @@ function makeCard(r) {
             method: "POST", headers: { "Content-Type": "image/jpeg" }, body: jpeg,
           });
           say(res.ok ? `Sent picture (${Math.round(jpeg.size / 1024)} KB)` : "Failed: " + (await res.text()).trim());
+          if (res.ok) wakeIfBlank();
         } catch (err) {
           say("Failed: " + err.message);
         }
@@ -304,10 +346,6 @@ function makeCard(r) {
       row.push(file, el("button", { textContent: "Send picture", onclick: () => file.click() }));
     }
     if (has("face")) row.push(el("button", { className: "soft", textContent: "Face", onclick: () => run("face") }));
-    if (has("screensaver")) {
-      row.push(el("button", { className: "soft", textContent: "Blank", onclick: () => run("screensaver", { on: true }, "blank screen") }),
-        el("button", { className: "soft", textContent: "Wake", onclick: () => run("screensaver", { on: false }, "wake screen") }));
-    }
     if (row.length) sections.push(el("div", { className: "row", style: "margin-top:8px" }, row));
   }
 
@@ -383,8 +421,15 @@ function makeCard(r) {
   c.root = el("section", { className: "card" }, sections);
 
   c.update = (r) => {
+    // Screen blank? Events are instant; telemetry (every 2 s) wins once events are quiet.
+    if ("screensaver" in r.telemetry && Date.now() - (c.blankEventAt || 0) > 3000) {
+      c.blank = r.telemetry.screensaver > 0;
+    }
     c.dot.className = "dot" + (r.online ? " on" : "");
-    c.meta.textContent = (r.online ? "online" : "offline, seen " + ago(r.last_seen)) + (r.model ? " · " + r.model : "");
+    const state = r.online ? "online"
+      : r.standby_until ? "standby until " + new Date(r.standby_until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : "offline, seen " + ago(r.last_seen);
+    c.meta.textContent = state + (r.model ? " · " + r.model : "");
     const keys = Object.keys(r.telemetry).sort();
     c.table.replaceChildren(...(keys.length ? keys.map((k) => {
       const [label, unit] = TELEMETRY_LABELS[k] || [k, ""];
@@ -404,7 +449,7 @@ function makeCard(r) {
         s.value.textContent = reported + s.unit;
       }
     }
-    c.root.querySelectorAll("button, input").forEach((e) => { e.disabled = !r.online; });
+    c.root.querySelectorAll("button, input, select").forEach((e) => { e.disabled = !r.online; });
     if (c.pingBtn) c.pingBtn.disabled = !r.online || c.pinging;
   };
   c.addEvent = (ev) => {
@@ -412,6 +457,10 @@ function makeCard(r) {
     const key = `${ev.seq}|${ev.ts}`;
     if (c.seen.has(key)) return;
     c.seen.add(key);
+    if (ev.name === "screensaver_on" || ev.name === "screensaver_off") {
+      c.blank = ev.name === "screensaver_on";
+      c.blankEventAt = Date.now();
+    }
     const where = ev.data && "x" in ev.data ? ` (${ev.data.x}, ${ev.data.y})`
       : ev.data && "manual" in ev.data ? (ev.data.manual ? " (manual)" : " (auto)") : "";
     c.events.unshift(new Date(ev.ts).toLocaleTimeString() + "  " + ev.name.replaceAll("_", " ") + where);
