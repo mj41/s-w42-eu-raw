@@ -84,6 +84,7 @@ const empty = document.getElementById("empty");
 const connLine = document.getElementById("conn");
 const cards = new Map();     // robot id -> card
 const pendingPings = new Map(); // ping id -> {t0, resolve}
+const serverInfo = fetch("/api/info").then((r) => r.json()).catch(() => ({})); // {https_url?}
 
 const EMOTIONS = ["neutral", "happy", "angry", "sad", "doubt", "sleepy"];
 const STICKERS = ["heart", "angry", "sweat", "shy", "dizzy"];
@@ -593,35 +594,52 @@ function makeCard(r) {
       for (let i = 0; i < f32.length; i++) f32[i] = 0.3 * Math.sin(2 * Math.PI * 880 * i / RATE) * Math.min(1, (f32.length - i) / 800);
       return playSamples(f32);
     };
+    // Talk: tap to start, tap again to stop. (Holding breaks on phones, where the
+    // first tap opens the microphone permission prompt.)
     const startTalk = async () => {
-      if (spk.talk) return;
-      await socket();
-      wakeIfBlank();
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const node = ctx.createScriptProcessor(2048, 1, 1);
-      node.onaudioprocess = (e) => send(resample(e.inputBuffer.getChannelData(0), ctx.sampleRate));
-      ctx.createMediaStreamSource(stream).connect(node);
-      node.connect(ctx.destination); // required for onaudioprocess; the output stays silent
-      spk.talk = { stream, ctx };
-      talk.textContent = "Talking… release to stop";
+      if (spk.talk || spk.starting) return;
+      spk.starting = true;
+      talk.textContent = "Starting…";
+      try {
+        await socket();
+        wakeIfBlank();
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        await ctx.resume();
+        const node = ctx.createScriptProcessor(2048, 1, 1);
+        node.onaudioprocess = (e) => send(resample(e.inputBuffer.getChannelData(0), ctx.sampleRate));
+        ctx.createMediaStreamSource(stream).connect(node);
+        node.connect(ctx.destination); // required for onaudioprocess; the output stays silent
+        spk.talk = { stream, ctx };
+        info.textContent = "Talking through the robot…";
+      } finally {
+        spk.starting = false;
+        talk.textContent = spk.talk ? "Stop talking" : "Talk";
+      }
     };
     const stopTalk = () => {
       if (!spk.talk) return;
       spk.talk.stream.getTracks().forEach((t) => t.stop());
       spk.talk.ctx.close();
       spk.talk = null;
-      talk.textContent = "Hold to talk";
+      talk.textContent = "Talk";
+      info.textContent = "";
     };
 
-    const talk = el("button", { textContent: "Hold to talk", style: "touch-action:none;user-select:none" });
+    const talk = el("button", { textContent: "Talk" });
     if (window.isSecureContext && navigator.mediaDevices) {
-      talk.onpointerdown = (e) => { e.preventDefault(); startTalk().catch((err) => say("Talk failed: " + err.message)); };
-      talk.onpointerup = talk.onpointerleave = talk.onpointercancel = stopTalk;
+      talk.onclick = () => (spk.talk ? stopTalk() : startTalk().catch((err) => say("Talk failed: " + err.message)));
     } else {
+      // Browsers give the microphone only to secure pages: link the server's HTTPS port if it has one.
       talk.disabled = true;
       talk.dataset.alwaysDisabled = "1";
-      info.textContent = "Talking needs a secure page: https://… or http://localhost on this computer.";
+      info.textContent = "Talking needs a secure page (https://).";
+      serverInfo.then((i) => {
+        if (i.https_url) {
+          info.replaceChildren("Talking needs a secure page: ", el("a", { href: i.https_url + "/", textContent: "open " + i.https_url }),
+            " (accept the certificate warning once).");
+        }
+      });
     }
     const file = el("input", { type: "file", accept: "audio/*", hidden: true });
     file.onchange = () => {

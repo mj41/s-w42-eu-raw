@@ -34,6 +34,7 @@ type Config struct {
 	PairTTL    time.Duration // lifetime of a pairing code
 	UIDir      string        // development: serve index.html from this directory instead of the embedded copy
 	StateFile  string        // JSON snapshot of pairings and robots, loaded by New (see state.go); "" disables
+	HTTPSPort  string        // port of the HTTPS listener for browsers, if any; advertised by /api/info
 	Log        *slog.Logger
 }
 
@@ -138,6 +139,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /{$}", s.handleIndex)
 	mux.HandleFunc("GET /pair", s.handlePair)
 	mux.HandleFunc("GET /api/robots", s.handleListRobots)
+	mux.HandleFunc("GET /api/info", s.handleInfo)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("POST /api/robots/{id}/command", s.handleCommand)
 	mux.HandleFunc("POST /api/robots/{id}/picture", s.handlePicture)

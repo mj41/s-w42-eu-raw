@@ -610,3 +610,18 @@ func TestStateSurvivesRestart(t *testing.T) {
 		t.Fatalf("event after restart: %+v", ev)
 	}
 }
+
+func TestInfoAdvertisesHTTPS(t *testing.T) {
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for _, tc := range []struct{ port, want string }{{"8766", "https://192.168.1.10:8766"}, {"", ""}} {
+		s := New(Config{RobotToken: testToken, HTTPSPort: tc.port, Log: quiet})
+		req := httptest.NewRequest("GET", "http://192.168.1.10:8765/api/info", nil)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		var info map[string]string
+		json.NewDecoder(rec.Body).Decode(&info)
+		if info["https_url"] != tc.want {
+			t.Errorf("port %q: https_url %q, want %q", tc.port, info["https_url"], tc.want)
+		}
+	}
+}

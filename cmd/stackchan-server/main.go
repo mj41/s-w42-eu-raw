@@ -2,11 +2,14 @@
 //
 // Robots connect to ws://<host>/api/workers/connect with a bearer token.
 // Browsers open http://<host>/ and pair by scanning the robot's QR code.
+// With -tls-listen, the same dashboard is also served over HTTPS (for the
+// microphone, which browsers allow only on secure pages).
 package main
 
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -34,6 +37,9 @@ func main() {
 		debug     = flag.Bool("debug", false, "debug logging")
 		stateFile = flag.String("state-file", defaultStateFile(), "JSON file that keeps pairings and robots across restarts (\"\" disables)")
 		uiDir     = flag.String("ui-dir", "", "development: serve index.html from this directory on every request (e.g. internal/server/ui), so UI edits need only a page reload")
+		tlsListen = flag.String("tls-listen", "", "also serve browsers over HTTPS on this address, e.g. :8766 (robots stay on -listen)")
+		tlsCert   = flag.String("tls-cert", defaultConfigFile("tls-cert.pem"), "TLS certificate for -tls-listen; a self-signed one is created if missing")
+		tlsKey    = flag.String("tls-key", defaultConfigFile("tls-key.pem"), "TLS key for -tls-listen")
 	)
 	flag.Parse()
 
@@ -56,15 +62,41 @@ func main() {
 		}
 	}
 
+	var httpsPort string
+	var cert tls.Certificate
+	if *tlsListen != "" {
+		if _, httpsPort, err = net.SplitHostPort(*tlsListen); err != nil {
+			log.Error("tls-listen", "err", err)
+			os.Exit(1)
+		}
+		if cert, err = loadOrCreateCert(*tlsCert, *tlsKey, log); err != nil {
+			log.Error("TLS certificate", "err", err)
+			os.Exit(1)
+		}
+	}
+
 	srv := server.New(server.Config{
 		RobotToken: token,
 		PublicURL:  strings.TrimRight(*publicURL, "/"),
 		PairTTL:    *pairTTL,
 		UIDir:      *uiDir,
 		StateFile:  *stateFile,
+		HTTPSPort:  httpsPort,
 		Log:        log,
 	})
 	httpSrv := &http.Server{Addr: *listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	var httpsSrv *http.Server
+	if *tlsListen != "" {
+		httpsSrv = &http.Server{Addr: *tlsListen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second,
+			TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}}}
+		go func() {
+			log.Info("serving browsers over HTTPS", "listen", *tlsListen, "cert", *tlsCert)
+			if err := httpsSrv.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("https server", "err", err)
+				os.Exit(1)
+			}
+		}()
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -73,6 +105,9 @@ func main() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		if httpsSrv != nil {
+			httpsSrv.Shutdown(shutdownCtx)
+		}
 		httpSrv.Shutdown(shutdownCtx)
 	}()
 
@@ -100,11 +135,16 @@ func defaultStateFile() string {
 }
 
 func defaultTokenFile() string {
+	return defaultConfigFile("robot-token")
+}
+
+// defaultConfigFile is name in ~/.config/stackchan-server (or the platform's config dir).
+func defaultConfigFile(name string) string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
-		return "robot-token"
+		return name
 	}
-	return filepath.Join(dir, "stackchan-server", "robot-token")
+	return filepath.Join(dir, "stackchan-server", name)
 }
 
 // loadOrCreateToken reads the shared robot token, generating a random one on first run.

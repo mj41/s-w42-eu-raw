@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -30,6 +31,20 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Write(page)
+}
+
+// handleInfo tells the dashboard about this server: the HTTPS address of the
+// same host when there is an HTTPS listener (the page links to it for the microphone).
+func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
+	info := map[string]string{}
+	if s.cfg.HTTPSPort != "" {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(r.Host); err == nil {
+			host = h
+		}
+		info["https_url"] = "https://" + net.JoinHostPort(host, s.cfg.HTTPSPort)
+	}
+	writeJSON(w, http.StatusOK, info)
 }
 
 // emojiFiles serves the dashboard's emoji SVGs (Fluent Emoji Flat, MIT; see
