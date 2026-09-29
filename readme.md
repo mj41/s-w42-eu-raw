@@ -21,6 +21,20 @@ go run ./cmd/fake-robot                    # simulated robot, in a second termin
 - Open the dashboard with the same host as the QR code (e.g. `http://192.168.0.18:8765/`, not `localhost`). The pairing cookie belongs to that host.
 - Run `go test -race ./...` for the tests.
 
+## Deploy
+
+A public instance runs at **https://chan.w42.eu**.
+
+1. **Release:** push a `v*` tag. `.github/workflows/release.yml` builds and pushes `ghcr.io/mj41/stackchan-server:<tag>`.
+2. **Deploy:** run the new image where you host it, pinned by digest.
+3. **Robot token:** keep it in your host's secret store, never in git.
+
+Constraints:
+
+- **One replica:** all state is in memory, so the Deployment uses one replica with `Recreate`.
+- **No request timeout** on the proxy in front, so it never cuts the robot WebSocket or browser SSE.
+- **TLS:** it ends at the gateway, so `-public-url https://…` also makes the session cookie `Secure`.
+
 ## Protocol
 
 The frame envelope and handshake are the same as yolovm-pilot's (`~/work-stai/stai-yolovm/docs/yolovm-pilot/wire-protocol.md`), so the same robot can also register there as a `robot`-class worker.
@@ -48,9 +62,8 @@ The frame envelope and handshake are the same as yolovm-pilot's (`~/work-stai/st
 
 ## Status
 
-This is the first vertical slice: it runs on the LAN over plain `ws://` with one shared robot token. Next steps:
+This is the first vertical slice. It runs on the LAN (`ws://`) for development, and in the cloud at `wss://chan.w42.eu` with one shared robot token per deployment. Next steps:
 
-1. TLS (`wss://`)
-2. Per-device identity: ESP32-S3 DS peripheral, see yolovm phase 4.5
-3. Persisting pairings
-4. User accounts
+1. Per-device identity: ESP32-S3 DS peripheral, see yolovm phase 4.5
+2. Persisting pairings across restarts
+3. User accounts
