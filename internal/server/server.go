@@ -24,7 +24,7 @@ import (
 	"github.com/mj41/stackchan-server/internal/wire"
 )
 
-//go:embed ui/index.html
+//go:embed ui/index.html ui/emoji
 var uiFS embed.FS
 
 // Config configures a Server.
@@ -139,6 +139,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/robots/{id}/command", s.handleCommand)
 	mux.HandleFunc("POST /api/robots/{id}/picture", s.handlePicture)
 	mux.HandleFunc("GET /api/robots/{id}/media", s.handleMedia)
+	mux.Handle("GET /emoji/", http.StripPrefix("/emoji/", s.emojiFiles()))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok\n")) })
 	return mux
 }

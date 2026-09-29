@@ -115,7 +115,8 @@ type RobotCommandBody struct {
 }
 
 // RobotEventBody reports something that happened on the robot: "shake",
-// "head_press", "head_swipe_forward", "head_swipe_backward", "screen_tap"
+// "head_press" with the zone intensities {"z0", "z1", "z2"} (0-3),
+// "head_release" with {"ms"}, "head_swipe_forward", "head_swipe_backward", "screen_tap"
 // with data {"x", "y"} in screen pixels (320x240), "nfc_tag" with data
 // {"uid", "type", "atqa", "sak", optional "text"} (the first NDEF record: URI
 // or text), "nfc_removed" with {"uid"}, and screensaver/standby events.

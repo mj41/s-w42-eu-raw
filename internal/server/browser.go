@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"mime"
 	"net/http"
 	"net/url"
@@ -29,6 +30,16 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Write(page)
+}
+
+// emojiFiles serves the dashboard's emoji SVGs (Fluent Emoji Flat, MIT; see
+// ui/emoji/LICENSE). They need no session: they are public artwork.
+func (s *Server) emojiFiles() http.Handler {
+	if s.cfg.UIDir != "" {
+		return http.FileServer(http.Dir(filepath.Join(s.cfg.UIDir, "emoji")))
+	}
+	sub, _ := fs.Sub(uiFS, "ui/emoji")
+	return http.FileServerFS(sub)
 }
 
 // handlePair is the QR target. GET because a phone camera opens it directly;

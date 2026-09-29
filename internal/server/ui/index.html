@@ -41,6 +41,9 @@
   input[type=text] { font: inherit; flex: 1; min-width: 0; padding: 9px 12px; border-radius: 10px;
                      border: 1px solid var(--border); background: var(--bg); color: var(--text); }
   .row.pixels { margin-top: 8px; gap: 6px; }
+  .row.emojis { gap: 6px; }
+  .row.emojis button { padding: 6px; line-height: 0; }
+  .row.emojis img { width: 32px; height: 32px; }
   input[type=color].pixel { width: 36px; height: 32px; }
   input[type=color] { width: 48px; height: 40px; border: 1px solid var(--border); border-radius: 10px;
                       background: var(--bg); padding: 2px; }
@@ -84,6 +87,8 @@ const pendingPings = new Map(); // ping id -> {t0, resolve}
 
 const EMOTIONS = ["neutral", "happy", "angry", "sad", "doubt", "sleepy"];
 const STICKERS = ["heart", "angry", "sweat", "shy", "dizzy"];
+// Fluent Emoji Flat (MIT, © Microsoft), served from /emoji/<name>.svg.
+const EMOJIS = ["smile", "grin", "laugh", "wink", "love", "cool", "surprised", "thinking", "sleepy", "cry", "sob", "angry"];
 
 // Scale and crop a picture to the robot screen (320x240) as a baseline JPEG.
 async function toJpeg320(file) {
@@ -95,11 +100,39 @@ async function toJpeg320(file) {
   return new Promise((resolve, reject) =>
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("could not encode JPEG"))), "image/jpeg", 0.8));
 }
+
+// An emoji drawn large in the middle of a black 320x240 JPEG.
+async function emojiJpeg(name) {
+  // The files say 32x32; enlarge them first so the browser rasterizes the vectors at full size.
+  const svg = (await (await fetch("/emoji/" + name + ".svg")).text()).replace('width="32" height="32"', 'width="200" height="200"');
+  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const canvas = Object.assign(document.createElement("canvas"), { width: 320, height: 240 });
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, 320, 240);
+    ctx.drawImage(img, 60, 20, 200, 200);
+    return await new Promise((resolve, reject) =>
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("could not encode JPEG"))), "image/jpeg", 0.9));
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 const TELEMETRY_LABELS = {
   battery_pct: ["Battery", "%"], charging: ["Charging", ""], head_yaw_deg: ["Head yaw", "°"],
   head_pitch_deg: ["Head pitch", "°"], wifi_rssi_dbm: ["Wi-Fi", " dBm"], free_heap_kb: ["Free memory", " kB"],
   uptime_s: ["Uptime", " s"], brightness_pct: ["Brightness", "%"], volume_pct: ["Volume", "%"],
   screensaver: ["Screensaver", ""],
+};
+// Shown in their own table, in this order.
+const SENSOR_LABELS = {
+  imu_ax_g: ["Accel X", " g"], imu_ay_g: ["Accel Y", " g"], imu_az_g: ["Accel Z", " g"], imu_gyro_dps: ["Rotation", " °/s"],
+  yaw_load_pct: ["Yaw servo load", "%"], pitch_load_pct: ["Pitch servo load", "%"],
+  yaw_temp_c: ["Yaw servo temp", " °C"], pitch_temp_c: ["Pitch servo temp", " °C"],
+  servo_voltage_v: ["Servo supply", " V"], chip_temp_c: ["Chip temp", " °C"],
 };
 
 function el(tag, props = {}, children = []) {
@@ -183,6 +216,7 @@ function makeCard(r) {
     el("div", { className: "head" }, [c.dot, el("span", { className: "name", textContent: r.id }), c.meta]),
     el("h2", { textContent: "Status" }), c.table,
     el("h2", { textContent: "Events" }), (c.eventList = el("ul", { className: "events" })),
+    (c.sensorHead = el("h2", { textContent: "Sensors", hidden: true })), (c.sensorTable = el("table", { hidden: true })),
   ];
 
   if (has("screensaver") || has("standby")) {
@@ -361,20 +395,25 @@ function makeCard(r) {
     }
     const row = [];
     if (has("image")) {
-      const file = el("input", { type: "file", accept: "image/*", hidden: true });
-      file.onchange = async () => {
-        if (!file.files.length) return;
+      const sendPicture = async (makeJpeg, label) => {
         try {
-          say("Sending picture…");
-          const jpeg = await toJpeg320(file.files[0]);
+          say("Sending " + label + "…");
+          const jpeg = await makeJpeg();
           const res = await fetch("/api/robots/" + encodeURIComponent(c.id) + "/picture", {
             method: "POST", headers: { "Content-Type": "image/jpeg" }, body: jpeg,
           });
-          say(res.ok ? `Sent picture (${Math.round(jpeg.size / 1024)} KB)` : "Failed: " + (await res.text()).trim());
+          say(res.ok ? `Sent ${label} (${Math.round(jpeg.size / 1024)} KB)` : "Failed: " + (await res.text()).trim());
           if (res.ok) wakeIfBlank();
         } catch (err) {
           say("Failed: " + err.message);
         }
+      };
+      sections.push(el("div", { className: "row emojis", style: "margin-top:8px" }, EMOJIS.map((name) =>
+        el("button", { className: "soft", title: name, ariaLabel: name, onclick: () => sendPicture(() => emojiJpeg(name), name) },
+          [el("img", { src: "/emoji/" + name + ".svg", alt: "" })]))));
+      const file = el("input", { type: "file", accept: "image/*", hidden: true });
+      file.onchange = async () => {
+        if (file.files.length) await sendPicture(() => toJpeg320(file.files[0]), "picture");
         file.value = "";
       };
       row.push(file, el("button", { textContent: "Send picture", onclick: () => file.click() }));
@@ -563,7 +602,13 @@ function makeCard(r) {
       : r.standby_until ? "standby until " + new Date(r.standby_until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
       : "offline, seen " + ago(r.last_seen);
     c.meta.textContent = state + (r.model ? " · " + r.model : "");
-    const keys = Object.keys(r.telemetry).sort();
+    const keys = Object.keys(r.telemetry).filter((k) => !(k in SENSOR_LABELS)).sort();
+    const sensorKeys = Object.keys(SENSOR_LABELS).filter((k) => k in r.telemetry);
+    c.sensorHead.hidden = c.sensorTable.hidden = !sensorKeys.length;
+    c.sensorTable.replaceChildren(...sensorKeys.map((k) => {
+      const [label, unit] = SENSOR_LABELS[k];
+      return el("tr", {}, [el("td", { textContent: label }), el("td", { textContent: r.telemetry[k] + unit })]);
+    }));
     c.table.replaceChildren(...(keys.length ? keys.map((k) => {
       const [label, unit] = TELEMETRY_LABELS[k] || [k, ""];
       const v = k === "charging" ? (r.telemetry[k] ? "yes" : "no")
@@ -597,6 +642,8 @@ function makeCard(r) {
     const d = ev.data || {};
     const where = "x" in d ? ` (${d.x}, ${d.y})`
       : "manual" in d ? (d.manual ? " (manual)" : " (auto)")
+      : "z0" in d ? ` (zones ${d.z0}·${d.z1}·${d.z2})`
+      : "ms" in d ? ` (${d.ms} ms)`
       : "uid" in d ? ` ${d.uid}` + (d.type ? ` (${d.type.replaceAll("_", " ")})` : "") + (d.text ? ` “${d.text}”` : "")
       : "";
     c.events.unshift(new Date(ev.ts).toLocaleTimeString() + "  " + ev.name.replaceAll("_", " ") + where);
