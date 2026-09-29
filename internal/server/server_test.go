@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -566,5 +567,46 @@ func TestSpeakerAudioToRobot(t *testing.T) {
 	media.WriteMessage(websocket.BinaryMessage, pcm)
 	if got := robot.expectBinary(); got[0] != wire.BinSpeakerPCM {
 		t.Fatalf("robot got type %#x, want speaker audio", got[0])
+	}
+}
+
+func TestStateSurvivesRestart(t *testing.T) {
+	stateFile := t.TempDir() + "/state.json"
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	s1 := New(Config{RobotToken: testToken, PairTTL: time.Minute, StateFile: stateFile, Log: quiet})
+	ts1 := httptest.NewServer(s1.Handler())
+	s1.cfg.PublicURL = ts1.URL
+	robot := connectRobot(t, ts1, "chan-1", wire.ClassRobot)
+	browser := pairBrowser(t, robot)
+	robot.send(wire.KindRobotEvent, wire.RobotEventBody{Name: "nfc_tag", Data: map[string]any{"uid": "04:A0"}})
+	time.Sleep(200 * time.Millisecond) // let the server record it
+	if err := s1.SaveState(); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Stat(stateFile); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("state file: %v, %v", fi, err)
+	}
+	robot.ws.Close() // Close waits for the robot's handler to return
+	ts1.Close()
+
+	// A new server on the same file: the browser's cookie still pairs it with the robot.
+	s2 := New(Config{RobotToken: testToken, PairTTL: time.Minute, StateFile: stateFile, Log: quiet})
+	ts2 := httptest.NewServer(s2.Handler())
+	defer ts2.Close()
+	defer ts2.CloseClientConnections() // ends the event stream, or Close would wait for it
+	resp, err := browser.Get(ts2.URL + "/api/robots")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var robots []robotView
+	json.NewDecoder(resp.Body).Decode(&robots)
+	resp.Body.Close()
+	if len(robots) != 1 || robots[0].ID != "chan-1" || robots[0].Online || len(robots[0].Commands) == 0 {
+		t.Fatalf("robots after restart: %+v", robots)
+	}
+	ev := waitForEvent(t, openEvents(t, browser, ts2), "robot_event")
+	if data, _ := ev["data"].(map[string]any); ev["name"] != "nfc_tag" || data["uid"] != "04:A0" {
+		t.Fatalf("event after restart: %+v", ev)
 	}
 }

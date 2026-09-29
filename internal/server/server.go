@@ -32,11 +32,13 @@ type Config struct {
 	RobotToken string        // shared bearer token robots must present
 	PublicURL  string        // base URL browsers use, e.g. http://192.168.1.10:8765
 	PairTTL    time.Duration // lifetime of a pairing code
+	UIDir      string        // development: serve index.html from this directory instead of the embedded copy
+	StateFile  string        // JSON snapshot of pairings and robots, loaded by New (see state.go); "" disables
 	Log        *slog.Logger
 }
 
-// Server holds all state in memory. A restart forgets pairings, and robots
-// simply show a new QR code.
+// Server holds all state in memory. With Config.StateFile, pairings and known
+// robots are also saved to a file and survive a restart (see state.go).
 type Server struct {
 	cfg Config
 	log *slog.Logger
@@ -48,6 +50,10 @@ type Server struct {
 	subs     map[*subscriber]struct{}   // open SSE streams
 	pings    map[string]pendingPing     // "robot/ping id" -> in-flight ping
 	media    map[*mediaSub]struct{}     // browser media sockets
+
+	saveNow   chan struct{} // asks RunStateSaver to save soon
+	saveMu    sync.Mutex    // serializes SaveState
+	lastSaved []byte        // last snapshot written, to skip unchanged saves
 }
 
 type pairCode struct {
@@ -103,7 +109,7 @@ func New(cfg Config) *Server {
 	if cfg.Log == nil {
 		cfg.Log = slog.Default()
 	}
-	return &Server{
+	s := &Server{
 		cfg:      cfg,
 		log:      cfg.Log,
 		robots:   map[string]*robotState{},
@@ -112,7 +118,14 @@ func New(cfg Config) *Server {
 		subs:     map[*subscriber]struct{}{},
 		pings:    map[string]pendingPing{},
 		media:    map[*mediaSub]struct{}{},
+		saveNow:  make(chan struct{}, 1),
 	}
+	if cfg.StateFile != "" {
+		if err := s.loadState(); err != nil {
+			s.log.Warn("state not loaded, starting empty", "file", cfg.StateFile, "err", err)
+		}
+	}
+	return s
 }
 
 // Handler returns the HTTP routes.
@@ -389,6 +402,7 @@ func (s *Server) redeem(session, code string) (robotID string, viewers int, conn
 		s.sessions[session] = map[string]bool{}
 	}
 	s.sessions[session][pc.robotID] = true
+	s.requestSave()
 	for _, paired := range s.sessions {
 		if paired[pc.robotID] {
 			viewers++

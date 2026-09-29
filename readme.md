@@ -4,7 +4,7 @@ Relay between M5Stack Stack-chan robots and web browsers for **Embody Mode**. It
 
 - **Robot:** opens an outbound WebSocket to the server and registers. It then shows a QR code for pairing, streams telemetry and events, and runs commands.
 - **Browser:** scans the robot's QR code to pair, then gets a live dashboard.
-- **Server:** one Go binary with the web page built in, and all state in memory.
+- **Server:** one Go binary with the web page built in. State lives in memory and is saved to a JSON file, so pairings survive a restart.
 
 The robot side is the Embody Mode app in the StackChan firmware fork (`firmware/main/apps/app_embody_mode/`, branch `mj-remote`). Workspace notes and the trust design live in `~/work-stai/stackchan-mj` (`AGENTS.md`, `docs/design.md`).
 
@@ -16,7 +16,7 @@ For each paired robot:
 - **Latency:** "Ping ×10" splits the round trip into browser ↔ server, server ↔ robot, and the robot's app loop.
 - **Face:** six emotions, `say` (speech bubble).
 - **Head:** nod, shake, home, and yaw/pitch sliders with ±5/±15 chips. A slider holds your target and shows the robot's reported angle ("now …"). Pitch is limited to 5–85° (M5Stack's safe range).
-- **LEDs:** left and right colour.
+- **LEDs:** one colour for all 12 LEDs, "Random" (a random colour per LED, for a quick test) and "Off"; effects drawn by the robot (Rainbow, Breathe, Chase, Blink) in that colour at three speeds; and a picker per LED.
 - **Settings:** brightness and volume.
 - **Screen:** stickers over the face (heart, angry, sweat, shy, dizzy), or a picture from the phone. The picture is scaled to 320x240 in the browser and replaces the face until "Face".
 - **Camera & mic:** live video (JPEG, about 5 fps) and the robot's microphone, played through Web Audio. The robot streams only while someone watches or listens, and shows a red LIVE badge meanwhile.
@@ -42,6 +42,8 @@ go run ./cmd/fake-robot                    # simulated robot, in a second termin
 - The first run generates the robot token at `~/.config/stackchan-server/robot-token`.
 - `fake-robot` implements the whole command set: a test-pattern camera, a 440 Hz "microphone", picture checks, and random events. It prints a pairing URL; open it in a browser or phone on the same network.
 - `-public-url` sets the base URL put into QR codes. The default is `http://<LAN IP>:<port>`.
+- `-state-file` (default `~/.local/state/stackchan-server/state.json`, `""` disables) keeps pairings and known robots across restarts: browsers stay paired, and robots show up offline with their last telemetry and events until they reconnect. The whole file is rewritten every 5 s when something changed, right after a pairing, and on shutdown. It holds session IDs, so it is mode 0600. It is a stopgap until a real database.
+- `-ui-dir internal/server/ui` serves the dashboard from disk on every request (development). UI edits then need only a page reload.
 - Open the dashboard with the same host as the QR code (e.g. `http://192.168.1.10:8765/`, not `localhost`). The pairing cookie belongs to that host.
 - Run `go test -race ./...` for the tests.
 
@@ -55,7 +57,7 @@ v0.1.0 (relay, pairing, telemetry, nod) runs at **https://chan.w42.eu**. Newer f
 
 Constraints:
 
-- **One replica:** all state is in memory, so the Deployment uses one replica with `Recreate`.
+- **One replica:** state is in memory, so the Deployment uses one replica with `Recreate`. The image disables the state file (`-state-file ""`) because the root file system is read-only; a pod restart forgets pairings until a volume is mounted for it.
 - **No request timeout** on the proxy in front, so it never cuts the robot WebSocket, the browser SSE, or the media sockets.
 - **TLS:** it ends at the gateway, so `-public-url https://…` also makes the session cookie `Secure`.
 - **Audio bandwidth:** microphone audio is raw PCM (about 48 KB/s). Compress it before offering audio through the cloud.
@@ -101,7 +103,7 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 | `sticker` | `{"name": "heart\|angry\|sweat\|shy\|dizzy", "seconds"}`: decoration over the face |
 | `face` | none: back to the face after a picture |
 | `image` | capability only: pictures arrive as binary `0x10` |
-| `leds` | `{"left": "#rrggbb", "right": "#rrggbb"}` |
+| `leds` | `{"left": "#rrggbb", "right": "#rrggbb"}` fades a whole side. `{"pixels": [...]}` sets up to 12 single LEDs (left 0–5, right 6–11; `null` skips one). `{"effect": "rainbow\|breathe\|chase\|blink\|off", "color", "speed": 0.2..5, "seconds"}` runs an animation on the robot (`seconds` 0 = until the next `leds`) |
 | `brightness` | `{"value": 1..100}` |
 | `volume` | `{"value": 0..100}` |
 | `camera`, `mic` | `{"on": bool}`: sent by the server, not by browsers, while someone watches or listens |
@@ -139,7 +141,7 @@ All endpoints need the session cookie of a browser that paired with the robot.
 
 This is an early prototype, tested on real hardware on the LAN.
 - **Auth:** one shared robot token per deployment.
-- **State:** held in memory only.
+- **State:** in memory, plus a JSON snapshot (`-state-file`) for restarts. Pairing codes and live connections are not saved.
 - **Plan:** the next steps follow `stackchan-mj/docs/design.md`:
   1. owner keys and signed config/grants
   2. rendezvous at `chan.w42.eu`

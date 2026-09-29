@@ -95,7 +95,9 @@ type PairedBody struct {
 //	look       {"yaw": deg, "pitch": deg}
 //	emotion    {"name": "neutral|happy|angry|sad|doubt|sleepy"}
 //	say        {"text": "...", "seconds": 6}   speech bubble
-//	leds       {"left": "#rrggbb", "right": "#rrggbb"}
+//	leds       {"left": "#rrggbb", "right": "#rrggbb"}  fade a side; also
+//	           {"pixels": ["#rrggbb" or null, ...]}   12 single LEDs, left 0-5, right 6-11
+//	           {"effect": "rainbow|breathe|chase|blink|off", "color", "speed": 0.2..5, "seconds"}
 //	brightness {"value": 1..100}
 //	volume     {"value": 0..100}
 //	sticker    {"name": "heart|angry|sweat|shy|dizzy", "seconds": 3}  decoration over the face

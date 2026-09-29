@@ -40,6 +40,8 @@
   button:disabled { opacity: 0.45; cursor: default; }
   input[type=text] { font: inherit; flex: 1; min-width: 0; padding: 9px 12px; border-radius: 10px;
                      border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+  .row.pixels { margin-top: 8px; gap: 6px; }
+  input[type=color].pixel { width: 36px; height: 32px; }
   input[type=color] { width: 48px; height: 40px; border: 1px solid var(--border); border-radius: 10px;
                       background: var(--bg); padding: 2px; }
   .axes { display: grid; gap: 14px; margin-top: 10px; }
@@ -306,16 +308,40 @@ function makeCard(r) {
   }
 
   if (has("leds")) {
-    const left = el("input", { type: "color", value: "#7d8cff" });
-    const right = el("input", { type: "color", value: "#ff3d9a" });
-    const send = () => run("leds", { left: left.value, right: right.value }, "LEDs");
-    left.onchange = send;
-    right.onchange = send;
-    sections.push(el("h2", { textContent: "LEDs" }), el("div", { className: "row" }, [
-      el("span", { className: "muted", textContent: "Left" }), left,
-      el("span", { className: "muted", textContent: "Right" }), right,
-      el("button", { className: "soft", textContent: "Off", onclick: () => run("leds", { left: "#000000", right: "#000000" }, "LEDs off") }),
-    ]));
+    // One colour paints all 12 LEDs (and is the effects' colour); Random and Off
+    // paint them too. The single-LED pickers below always show what was sent.
+    const color = el("input", { type: "color", value: "#7d8cff", title: "Colour for all LEDs and for effects" });
+    const pixels = Array.from({ length: 12 }, (_, i) => el("input", { type: "color", value: "#000000", className: "pixel", title: "LED " + i }));
+    const sendPixels = (label) => run("leds", { pixels: pixels.map((p) => p.value) }, label || "single LEDs");
+    const paint = (colorOf, label) => { pixels.forEach((p, i) => { p.value = colorOf(i); }); sendPixels(label); };
+    const randomColor = () => {
+      // A random hue at full saturation, so every LED is clearly lit.
+      const h = Math.random() * 6, f = h - Math.floor(h), q = Math.round(255 * (1 - f)), t = Math.round(255 * f);
+      const rgb = [[255, t, 0], [q, 255, 0], [0, 255, t], [0, q, 255], [t, 0, 255], [255, 0, q]][Math.floor(h)];
+      return "#" + rgb.map((v) => v.toString(16).padStart(2, "0")).join("");
+    };
+    color.onchange = () => paint(() => color.value, "all LEDs " + color.value);
+    pixels.forEach((p) => { p.onchange = () => sendPixels(); });
+
+    // Effects run on the robot (25 fps there), so nothing streams over the network.
+    const speed = el("select", { className: "select", ariaLabel: "Effect speed" },
+      [["0.5", "Slow"], ["1", "Normal"], ["2", "Fast"]].map(([v, t]) => el("option", { value: v, textContent: t, selected: v === "1" })));
+    const fx = (name) => run("leds", { effect: name, color: color.value, speed: +speed.value }, name + " LEDs");
+
+    sections.push(el("h2", { textContent: "LEDs" }),
+      el("div", { className: "row" }, [
+        el("span", { className: "muted", textContent: "All" }), color,
+        el("button", { className: "soft", textContent: "Random", onclick: () => paint(randomColor, "random LEDs") }),
+        el("button", { className: "soft", textContent: "Off", onclick: () => paint(() => "#000000", "LEDs off") }),
+      ]),
+      el("div", { className: "row", style: "margin-top:8px" }, [
+        ...["rainbow", "breathe", "chase", "blink"].map((n) =>
+          el("button", { className: "soft", textContent: n[0].toUpperCase() + n.slice(1), onclick: () => fx(n) })),
+        speed,
+      ]),
+      el("div", { className: "muted", style: "font-size:0.85rem;margin-top:10px", textContent: "Single LEDs: 0–5 on one side, 6–11 on the other" }),
+      el("div", { className: "row pixels" }, pixels.slice(0, 6)),
+      el("div", { className: "row pixels" }, pixels.slice(6)));
   }
 
   if (has("brightness") || has("volume")) {

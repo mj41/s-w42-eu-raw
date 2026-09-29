@@ -14,4 +14,6 @@ COPY --from=build /out/stackchan-server /stackchan-server
 EXPOSE 8765
 USER nonroot:nonroot
 # Mount the robot token at /secrets/robot-token and pass -public-url https://<host>.
-ENTRYPOINT ["/stackchan-server", "-listen", ":8765", "-token-file", "/secrets/robot-token"]
+# The root file system is read-only in the cluster, so no state file yet; mount a
+# volume and pass -state-file /state/state.json to keep pairings across restarts.
+ENTRYPOINT ["/stackchan-server", "-listen", ":8765", "-token-file", "/secrets/robot-token", "-state-file", ""]

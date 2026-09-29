@@ -1,0 +1,196 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/mj41/stackchan-server/internal/wire"
+)
+
+// State file: pairings and known robots are saved as one JSON snapshot so a
+// restart doesn't forget them. A stopgap until there is a real database: the
+// whole file is rewritten (at most every stateSaveInterval, right after a
+// pairing, and on shutdown) and read once at startup. Robots come back offline
+// until they reconnect. Pairing codes and live connections are not saved.
+
+const (
+	stateVersion      = 1
+	stateSaveInterval = 5 * time.Second
+)
+
+type stateFile struct {
+	Version  int                 `json:"version"`
+	Sessions map[string][]string `json:"sessions"` // browser session id -> paired robot ids
+	Robots   []robotRecord       `json:"robots"`
+}
+
+type robotRecord struct {
+	ID           string                 `json:"id"`
+	Capabilities wire.RobotCapabilities `json:"capabilities"`
+	Labels       map[string]string      `json:"labels,omitempty"`
+	LastSeen     time.Time              `json:"last_seen"`
+	Telemetry    map[string]float64     `json:"telemetry,omitempty"`
+	TelemetryAt  time.Time              `json:"telemetry_at,omitzero"`
+	Events       []json.RawMessage      `json:"events,omitempty"` // robot_event payloads, oldest first
+	EventSeq     uint64                 `json:"event_seq"`
+	StandbyUntil time.Time              `json:"standby_until,omitzero"`
+}
+
+// loadState restores the snapshot at cfg.StateFile, if there is one.
+func (s *Server) loadState() error {
+	b, err := os.ReadFile(s.cfg.StateFile)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var st stateFile
+	if err := json.Unmarshal(b, &st); err != nil {
+		return err
+	}
+	if st.Version != stateVersion {
+		return fmt.Errorf("version %d, want %d", st.Version, stateVersion)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for session, ids := range st.Sessions {
+		if !validSessionID(session) {
+			continue
+		}
+		paired := map[string]bool{}
+		for _, id := range ids {
+			paired[id] = true
+		}
+		s.sessions[session] = paired
+	}
+	for _, r := range st.Robots {
+		rs := &robotState{
+			id: r.ID, caps: r.Capabilities, labels: r.Labels, lastSeen: r.LastSeen,
+			telemetry: r.Telemetry, telemetryAt: r.TelemetryAt, eventSeq: r.EventSeq, standbyUntil: r.StandbyUntil,
+		}
+		if rs.telemetry == nil {
+			rs.telemetry = map[string]float64{}
+		}
+		for _, ev := range r.Events {
+			// The file is indented; an SSE data line must be one line.
+			var compact bytes.Buffer
+			if json.Compact(&compact, ev) == nil {
+				rs.events = append(rs.events, sseEvent{name: "robot_event", data: compact.Bytes()})
+			}
+		}
+		s.robots[r.ID] = rs
+	}
+	s.log.Info("state loaded", "file", s.cfg.StateFile, "sessions", len(st.Sessions), "robots", len(st.Robots))
+	return nil
+}
+
+func (s *Server) snapshot() ([]byte, error) {
+	st := stateFile{Version: stateVersion, Sessions: map[string][]string{}}
+	s.mu.Lock()
+	for session, paired := range s.sessions {
+		for id, ok := range paired {
+			if ok {
+				st.Sessions[session] = append(st.Sessions[session], id)
+			}
+		}
+		slices.Sort(st.Sessions[session])
+	}
+	for _, r := range s.robots {
+		rec := robotRecord{
+			ID: r.id, Capabilities: r.caps, Labels: r.labels, LastSeen: r.lastSeen,
+			Telemetry: r.telemetry, TelemetryAt: r.telemetryAt, EventSeq: r.eventSeq, StandbyUntil: r.standbyUntil,
+		}
+		for _, ev := range r.events {
+			rec.Events = append(rec.Events, ev.data)
+		}
+		st.Robots = append(st.Robots, rec)
+	}
+	slices.SortFunc(st.Robots, func(a, b robotRecord) int { return strings.Compare(a.ID, b.ID) })
+	b, err := json.MarshalIndent(st, "", "  ") // under the lock: the maps are shared
+	s.mu.Unlock()
+	return b, err
+}
+
+// SaveState writes the snapshot to cfg.StateFile if it changed. The file is
+// replaced atomically and readable only by this user: session IDs are credentials.
+func (s *Server) SaveState() error {
+	if s.cfg.StateFile == "" {
+		return nil
+	}
+	b, err := s.snapshot()
+	if err != nil {
+		return err
+	}
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
+	if bytes.Equal(b, s.lastSaved) {
+		return nil
+	}
+	dir := filepath.Dir(s.cfg.StateFile)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".state-*.json") // mode 0600
+	if err != nil {
+		return err
+	}
+	_, err = tmp.Write(b)
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), s.cfg.StateFile)
+	}
+	if err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	s.lastSaved = b
+	return nil
+}
+
+// RunStateSaver saves the state periodically and right after pairings until
+// ctx ends. Call SaveState once more after the HTTP server has stopped.
+func (s *Server) RunStateSaver(ctx context.Context) {
+	if s.cfg.StateFile == "" {
+		return
+	}
+	t := time.NewTicker(stateSaveInterval)
+	defer t.Stop()
+	lastErr := ""
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		case <-s.saveNow:
+		}
+		if err := s.SaveState(); err != nil {
+			if err.Error() != lastErr { // e.g. a read-only file system: say it once
+				s.log.Warn("state not saved", "file", s.cfg.StateFile, "err", err)
+			}
+			lastErr = err.Error()
+		} else {
+			lastErr = ""
+		}
+	}
+}
+
+// requestSave asks RunStateSaver to save soon. Safe with s.mu held.
+func (s *Server) requestSave() {
+	select {
+	case s.saveNow <- struct{}{}:
+	default:
+	}
+}

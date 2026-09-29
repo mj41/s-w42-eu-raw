@@ -32,6 +32,8 @@ func main() {
 		tokenFile = flag.String("token-file", defaultTokenFile(), "file with the robot bearer token; generated if missing")
 		pairTTL   = flag.Duration("pair-ttl", 5*time.Minute, "lifetime of a pairing code")
 		debug     = flag.Bool("debug", false, "debug logging")
+		stateFile = flag.String("state-file", defaultStateFile(), "JSON file that keeps pairings and robots across restarts (\"\" disables)")
+		uiDir     = flag.String("ui-dir", "", "development: serve index.html from this directory on every request (e.g. internal/server/ui), so UI edits need only a page reload")
 	)
 	flag.Parse()
 
@@ -58,12 +60,15 @@ func main() {
 		RobotToken: token,
 		PublicURL:  strings.TrimRight(*publicURL, "/"),
 		PairTTL:    *pairTTL,
+		UIDir:      *uiDir,
+		StateFile:  *stateFile,
 		Log:        log,
 	})
 	httpSrv := &http.Server{Addr: *listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go srv.RunStateSaver(ctx)
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -71,11 +76,27 @@ func main() {
 		httpSrv.Shutdown(shutdownCtx)
 	}()
 
-	log.Info("stackchan-server listening", "listen", *listen, "public_url", *publicURL, "token_file", *tokenFile)
+	log.Info("stackchan-server listening", "listen", *listen, "public_url", *publicURL, "token_file", *tokenFile, "state_file", *stateFile)
 	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("server", "err", err)
 		os.Exit(1)
 	}
+	if err := srv.SaveState(); err != nil {
+		log.Warn("state not saved", "file", *stateFile, "err", err)
+	}
+}
+
+// defaultStateFile follows the XDG base directory spec: $XDG_STATE_HOME or ~/.local/state.
+func defaultStateFile() string {
+	dir := os.Getenv("XDG_STATE_HOME")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		dir = filepath.Join(home, ".local", "state")
+	}
+	return filepath.Join(dir, "stackchan-server", "state.json")
 }
 
 func defaultTokenFile() string {

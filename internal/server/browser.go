@@ -6,6 +6,8 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -17,6 +19,9 @@ import (
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	s.session(w, r)
 	page, err := uiFS.ReadFile("ui/index.html")
+	if s.cfg.UIDir != "" {
+		page, err = os.ReadFile(filepath.Join(s.cfg.UIDir, "index.html"))
+	}
 	if err != nil {
 		http.Error(w, "ui missing", http.StatusInternalServerError)
 		return
