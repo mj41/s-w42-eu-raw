@@ -206,6 +206,14 @@ function makeCard(r) {
     }
   }
 
+  if (has("nfc")) {
+    sections.push(el("h2", { textContent: "NFC" }), el("div", { className: "row" }, [
+      el("button", { className: "soft", textContent: "Reader on", onclick: () => run("nfc", { on: true }, "NFC reader on") }),
+      el("button", { className: "soft", textContent: "Reader off", onclick: () => run("nfc", { on: false }, "NFC reader off") }),
+    ]), el("div", { className: "muted", style: "font-size:0.85rem;margin-top:6px",
+      textContent: "Hold a tag or card near the robot: it shows up under Events, with the link or text stored on NTAG stickers." }));
+  }
+
   if (has("ping")) {
     c.pingStats = el("div", { className: "stats muted", textContent: "Measures browser → server → robot and back." });
     const btn = el("button", { textContent: "Ping ×10", className: "soft" });
@@ -560,8 +568,11 @@ function makeCard(r) {
       c.blank = ev.name === "screensaver_on";
       c.blankEventAt = Date.now();
     }
-    const where = ev.data && "x" in ev.data ? ` (${ev.data.x}, ${ev.data.y})`
-      : ev.data && "manual" in ev.data ? (ev.data.manual ? " (manual)" : " (auto)") : "";
+    const d = ev.data || {};
+    const where = "x" in d ? ` (${d.x}, ${d.y})`
+      : "manual" in d ? (d.manual ? " (manual)" : " (auto)")
+      : "uid" in d ? ` ${d.uid}` + (d.type ? ` (${d.type.replaceAll("_", " ")})` : "") + (d.text ? ` “${d.text}”` : "")
+      : "";
     c.events.unshift(new Date(ev.ts).toLocaleTimeString() + "  " + ev.name.replaceAll("_", " ") + where);
     c.events.length = Math.min(c.events.length, 8);
     c.eventList.replaceChildren(...c.events.map((t) => el("li", { textContent: t })));

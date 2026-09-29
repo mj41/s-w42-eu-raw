@@ -28,7 +28,7 @@ import (
 
 // Same command set as the firmware (see wire.RobotCommandBody).
 var commands = []string{"ping", "nod", "shake", "look", "home", "emotion", "say", "leds", "brightness", "volume",
-	"sticker", "face", "image", "camera", "mic", "screensaver", "standby", "speaker"}
+	"sticker", "face", "image", "camera", "mic", "screensaver", "standby", "speaker", "nfc"}
 
 func main() {
 	var (
@@ -49,7 +49,7 @@ func main() {
 	token := strings.TrimSpace(string(b))
 	url := strings.TrimRight(*serverURL, "/") + wire.ConnectPath
 
-	r := &robot{started: time.Now(), battery: 87, pitch: 45, brightness: 60, volume: 50, log: log}
+	r := &robot{started: time.Now(), battery: 87, pitch: 45, brightness: 60, volume: 50, nfcOn: true, log: log}
 	// Reconnect with exponential backoff 1 s -> 30 s, like yolovm workers.
 	backoff := time.Second
 	for {
@@ -78,6 +78,7 @@ type robot struct {
 	battery, yaw, pitch float64
 	brightness, volume  float64
 	cameraOn, micOn     bool
+	nfcOn               bool    // NFC polling, on by default like the firmware
 	screensaver         float64 // 0 off, 1 auto, 2 manual
 	afterStandby        bool    // report standby_end after the next connect
 	frame               int     // camera frames sent, drives the test pattern
@@ -146,7 +147,7 @@ func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) e
 		defer t.Stop()
 		eventTick = t.C
 	}
-	fakeEvents := []string{"head_press", "head_swipe_forward", "shake", "screen_tap"}
+	fakeEvents := []string{"head_press", "head_swipe_forward", "shake", "screen_tap", "nfc_tag"}
 	videoTick := time.NewTicker(200 * time.Millisecond) // 5 fps, like the firmware
 	defer videoTick.Stop()
 	audioTick := time.NewTicker(40 * time.Millisecond) // 40 ms PCM chunks
@@ -167,8 +168,14 @@ func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) e
 			err = send(wire.KindHeartbeat, nil)
 		case <-eventTick:
 			ev := wire.RobotEventBody{Name: fakeEvents[rand.IntN(len(fakeEvents))]}
-			if ev.Name == "screen_tap" {
+			switch {
+			case ev.Name == "screen_tap":
 				ev.Data = map[string]any{"x": rand.IntN(320), "y": rand.IntN(240)}
+			case ev.Name == "nfc_tag" && r.nfcOn:
+				ev.Data = map[string]any{"uid": "04:A2:3B:1C:5D:80:00", "type": "type2", "atqa": 68, "sak": 0,
+					"text": "https://github.com/mj41/stackchan-server"}
+			case ev.Name == "nfc_tag":
+				ev.Name = "shake"
 			}
 			r.log.Info("robot event", "name", ev.Name, "data", ev.Data)
 			err = send(wire.KindRobotEvent, ev)
@@ -238,6 +245,8 @@ func (r *robot) handle(c received, send func(string, any) error) error {
 		r.cameraOn, _ = c.cmd.Args["on"].(bool)
 	case "mic":
 		r.micOn, _ = c.cmd.Args["on"].(bool)
+	case "nfc":
+		r.nfcOn, _ = c.cmd.Args["on"].(bool)
 	case "brightness":
 		if v, ok := num("value"); ok {
 			r.brightness = max(1, min(100, v))

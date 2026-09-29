@@ -103,14 +103,20 @@ type PairedBody struct {
 //	image                                      (no JSON: pictures arrive as BinShowJPEG)
 //	camera     {"on": bool}                    sent by the server while browsers watch
 //	mic        {"on": bool}                    sent by the server while browsers listen
+//	screensaver {"on": bool}                   blank the screen / wake it
+//	standby    {"minutes": 1..120}             offline with the screen off
+//	speaker                                    (no JSON: audio arrives as BinSpeakerPCM)
+//	nfc        {"on": bool}                    NFC tag polling (on by default)
 type RobotCommandBody struct {
 	Command string         `json:"command"`
 	Args    map[string]any `json:"args,omitempty"`
 }
 
 // RobotEventBody reports something that happened on the robot: "shake",
-// "head_press", "head_swipe_forward", "head_swipe_backward", or "screen_tap"
-// with data {"x", "y"} in screen pixels (320x240).
+// "head_press", "head_swipe_forward", "head_swipe_backward", "screen_tap"
+// with data {"x", "y"} in screen pixels (320x240), "nfc_tag" with data
+// {"uid", "type", "atqa", "sak", optional "text"} (the first NDEF record: URI
+// or text), "nfc_removed" with {"uid"}, and screensaver/standby events.
 type RobotEventBody struct {
 	Name string         `json:"name"`
 	Data map[string]any `json:"data,omitempty"`
