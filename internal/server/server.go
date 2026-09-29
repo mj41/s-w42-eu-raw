@@ -13,6 +13,7 @@ import (
 	"embed"
 	"encoding/hex"
 	"log/slog"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -166,9 +167,7 @@ func (s *Server) setTelemetry(id string, m map[string]float64) {
 	s.mu.Lock()
 	st := s.robots[id]
 	if st != nil {
-		for k, v := range m {
-			st.telemetry[k] = v
-		}
+		maps.Copy(st.telemetry, m)
 		st.telemetryAt = time.Now()
 		st.lastSeen = st.telemetryAt
 	}
@@ -192,9 +191,7 @@ func (s *Server) view(st *robotState) robotView {
 	if v.Commands == nil {
 		v.Commands = []string{}
 	}
-	for k, val := range st.telemetry {
-		v.Telemetry[k] = val
-	}
+	maps.Copy(v.Telemetry, st.telemetry)
 	if !st.telemetryAt.IsZero() {
 		t := st.telemetryAt
 		v.TelemetryAt = &t
@@ -301,7 +298,8 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) string {
 		MaxAge:   int((365 * 24 * time.Hour) / time.Second),
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   r.TLS != nil,
+		// Behind a TLS-terminating gateway r.TLS is nil, so also trust the public URL.
+		Secure: r.TLS != nil || strings.HasPrefix(s.cfg.PublicURL, "https://"),
 	})
 	return id
 }

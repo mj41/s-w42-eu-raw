@@ -32,7 +32,7 @@ type testRobot struct {
 	ws *websocket.Conn
 }
 
-func dialRobot(t *testing.T, ts *httptest.Server, token, id string) (*websocket.Conn, *http.Response, error) {
+func dialRobot(ts *httptest.Server, token, id string) (*websocket.Conn, *http.Response, error) {
 	h := http.Header{}
 	h.Set("Authorization", "Bearer "+token)
 	h.Set(wire.WorkerIDHeader, id)
@@ -41,7 +41,7 @@ func dialRobot(t *testing.T, ts *httptest.Server, token, id string) (*websocket.
 
 func connectRobot(t *testing.T, ts *httptest.Server, id string, class string) *testRobot {
 	t.Helper()
-	ws, _, err := dialRobot(t, ts, testToken, id)
+	ws, _, err := dialRobot(ts, testToken, id)
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
@@ -89,7 +89,7 @@ func (r *testRobot) expect(kind string, body any) {
 	}
 }
 
-func newBrowser(t *testing.T) *http.Client {
+func newBrowser() *http.Client {
 	jar, _ := cookiejar.New(nil)
 	return &http.Client{Jar: jar, Timeout: 5 * time.Second}
 }
@@ -106,7 +106,7 @@ func TestPairTelemetryAndCommand(t *testing.T) {
 		t.Fatalf("unexpected pair code %+v", pc)
 	}
 
-	browser := newBrowser(t)
+	browser := newBrowser()
 
 	// Before pairing the browser sees nothing and cannot command the robot.
 	if got := listRobots(t, browser, ts); len(got) != 0 {
@@ -137,7 +137,7 @@ func TestPairTelemetryAndCommand(t *testing.T) {
 	}
 
 	// A used code does not work again, e.g. for someone who photographed the QR.
-	resp, err = newBrowser(t).Get(pc.URL)
+	resp, err = newBrowser().Get(pc.URL)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,10 +176,10 @@ func TestPairTelemetryAndCommand(t *testing.T) {
 
 func TestRobotAuth(t *testing.T) {
 	ts, _ := newTestServer(t)
-	if _, resp, err := dialRobot(t, ts, "wrong", "chan-1"); err == nil || resp.StatusCode != http.StatusUnauthorized {
+	if _, resp, err := dialRobot(ts, "wrong", "chan-1"); err == nil || resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("wrong token: err=%v resp=%v", err, resp)
 	}
-	if _, resp, err := dialRobot(t, ts, testToken, "bad id!"); err == nil || resp.StatusCode != http.StatusBadRequest {
+	if _, resp, err := dialRobot(ts, testToken, "bad id!"); err == nil || resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("bad id: err=%v resp=%v", err, resp)
 	}
 }
@@ -196,13 +196,31 @@ func TestRejectsNonRobotClass(t *testing.T) {
 
 func TestInvalidPairCode(t *testing.T) {
 	ts, _ := newTestServer(t)
-	resp, err := newBrowser(t).Get(ts.URL + "/pair?code=NOPE2345")
+	resp, err := newBrowser().Get(ts.URL + "/pair?code=NOPE2345")
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
+	}
+}
+
+func TestSecureCookieBehindTLSGateway(t *testing.T) {
+	for _, tc := range []struct {
+		publicURL string
+		secure    bool
+	}{
+		{"https://chan.example.com", true},
+		{"http://192.168.0.18:8765", false},
+	} {
+		s := New(Config{RobotToken: testToken, PublicURL: tc.publicURL, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+		cookies := rec.Result().Cookies()
+		if len(cookies) != 1 || cookies[0].Secure != tc.secure {
+			t.Errorf("public URL %s: cookies %+v, want one with Secure=%v", tc.publicURL, cookies, tc.secure)
+		}
 	}
 }
 
