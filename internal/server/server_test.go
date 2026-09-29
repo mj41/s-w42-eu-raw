@@ -49,7 +49,7 @@ func connectRobot(t *testing.T, ts *httptest.Server, id string, class string) *t
 	r := &testRobot{t: t, ws: ws}
 	r.send(wire.KindRegister, wire.RegisterBody{
 		Class:        class,
-		Capabilities: wire.RobotCapabilities{Model: "test", Commands: []string{"nod", "ping"}},
+		Capabilities: wire.RobotCapabilities{Model: "test", Commands: []string{"nod", "ping", "camera", "mic", "image"}},
 	})
 	return r
 }
@@ -70,9 +70,12 @@ func (r *testRobot) expect(kind string, body any) {
 	r.t.Helper()
 	r.ws.SetReadDeadline(time.Now().Add(3 * time.Second))
 	for {
-		_, data, err := r.ws.ReadMessage()
+		msgType, data, err := r.ws.ReadMessage()
 		if err != nil {
 			r.t.Fatalf("waiting for %s: %v", kind, err)
+		}
+		if msgType == websocket.BinaryMessage {
+			continue
 		}
 		frames, err := wire.Parse(data)
 		if err != nil {
@@ -395,5 +398,97 @@ func TestPingAndRobotEvents(t *testing.T) {
 		default:
 		}
 		break
+	}
+}
+
+func (r *testRobot) expectBinary() []byte {
+	r.t.Helper()
+	r.ws.SetReadDeadline(time.Now().Add(3 * time.Second))
+	for {
+		msgType, data, err := r.ws.ReadMessage()
+		if err != nil {
+			r.t.Fatalf("waiting for a binary message: %v", err)
+		}
+		if msgType == websocket.BinaryMessage {
+			return data
+		}
+	}
+}
+
+func dialMedia(ts *httptest.Server, browser *http.Client, robotID, query, origin string) (*websocket.Conn, *http.Response, error) {
+	d := websocket.Dialer{Jar: browser.Jar}
+	h := http.Header{}
+	h.Set("Origin", origin)
+	return d.Dial("ws"+strings.TrimPrefix(ts.URL, "http")+"/api/robots/"+robotID+"/media?"+query, h)
+}
+
+func TestMediaRelayPictureAndTap(t *testing.T) {
+	ts, _ := newTestServer(t)
+	robot := connectRobot(t, ts, "chan-1", wire.ClassRobot)
+	browser := pairBrowser(t, robot)
+
+	// A page from another origin can't open the media socket with our cookie.
+	if _, resp, err := dialMedia(ts, browser, "chan-1", "video=1", "http://evil.example"); err == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("foreign origin: err=%v resp=%v", err, resp)
+	}
+	// Nor can a browser that isn't paired.
+	if _, resp, err := dialMedia(ts, newBrowser(), "chan-1", "video=1", ts.URL); err == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("unpaired: err=%v resp=%v", err, resp)
+	}
+
+	media, _, err := dialMedia(ts, browser, "chan-1", "video=1", ts.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cmd wire.RobotCommandBody
+	robot.expect(wire.KindRobotCommand, &cmd)
+	if cmd.Command != "camera" || cmd.Args["on"] != true {
+		t.Fatalf("robot got %+v, want camera on", cmd)
+	}
+
+	// Video reaches the browser; audio does not (not subscribed).
+	send := func(msg []byte) {
+		if err := robot.ws.WriteMessage(websocket.BinaryMessage, msg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send([]byte{wire.BinCameraJPEG, 0xFF, 0xD8, 1})
+	send([]byte{wire.BinAudioPCM, 1, 2, 3, 4})
+	send([]byte{wire.BinCameraJPEG, 0xFF, 0xD8, 2})
+	media.SetReadDeadline(time.Now().Add(3 * time.Second))
+	for _, want := range [][]byte{{wire.BinCameraJPEG, 0xFF, 0xD8, 1}, {wire.BinCameraJPEG, 0xFF, 0xD8, 2}} {
+		_, got, err := media.ReadMessage()
+		if err != nil || string(got) != string(want) {
+			t.Fatalf("media got %v (%v), want %v", got, err, want)
+		}
+	}
+
+	// The last viewer leaving turns the camera off.
+	media.Close()
+	robot.expect(wire.KindRobotCommand, &cmd)
+	if cmd.Command != "camera" || cmd.Args["on"] != false {
+		t.Fatalf("robot got %+v, want camera off", cmd)
+	}
+
+	// Pictures travel to the robot as binary BinShowJPEG.
+	jpeg := []byte{0xFF, 0xD8, 0xFF, 0xE0, 9, 9}
+	resp, err := browser.Post(ts.URL+"/api/robots/chan-1/picture", "image/jpeg", strings.NewReader(string(jpeg)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("picture: status %d", resp.StatusCode)
+	}
+	if got := robot.expectBinary(); string(got) != string(append([]byte{wire.BinShowJPEG}, jpeg...)) {
+		t.Fatalf("robot got picture %v", got)
+	}
+
+	// Screen taps carry their coordinates.
+	events := openEvents(t, browser, ts)
+	robot.send(wire.KindRobotEvent, wire.RobotEventBody{Name: "screen_tap", Data: map[string]any{"x": 10, "y": 20}})
+	ev := waitForEvent(t, events, "robot_event")
+	if data, _ := ev["data"].(map[string]any); ev["name"] != "screen_tap" || data["x"] != 10.0 || data["y"] != 20.0 {
+		t.Fatalf("tap event %+v", ev)
 	}
 }

@@ -72,6 +72,18 @@ const cards = new Map();     // robot id -> card
 const pendingPings = new Map(); // ping id -> {t0, resolve}
 
 const EMOTIONS = ["neutral", "happy", "angry", "sad", "doubt", "sleepy"];
+const STICKERS = ["heart", "angry", "sweat", "shy", "dizzy"];
+
+// Scale and crop a picture to the robot screen (320x240) as a baseline JPEG.
+async function toJpeg320(file) {
+  const bmp = await createImageBitmap(file);
+  const canvas = Object.assign(document.createElement("canvas"), { width: 320, height: 240 });
+  const scale = Math.max(320 / bmp.width, 240 / bmp.height);
+  const w = bmp.width * scale, h = bmp.height * scale;
+  canvas.getContext("2d").drawImage(bmp, (320 - w) / 2, (240 - h) / 2, w, h);
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("could not encode JPEG"))), "image/jpeg", 0.8));
+}
 const TELEMETRY_LABELS = {
   battery_pct: ["Battery", "%"], charging: ["Charging", ""], head_yaw_deg: ["Head yaw", "°"],
   head_pitch_deg: ["Head pitch", "°"], wifi_rssi_dbm: ["Wi-Fi", " dBm"], free_heap_kb: ["Free memory", " kB"],
@@ -242,6 +254,100 @@ function makeCard(r) {
     sections.push(el("div", { className: "row" }, rows));
   }
 
+  if (has("sticker") || has("image") || has("face")) {
+    sections.push(el("h2", { textContent: "Screen" }));
+    if (has("sticker")) {
+      sections.push(el("div", { className: "row" }, STICKERS.map((name) =>
+        el("button", { className: "soft", textContent: name, onclick: () => run("sticker", { name, seconds: 4 }, name) }))));
+    }
+    const row = [];
+    if (has("image")) {
+      const file = el("input", { type: "file", accept: "image/*", hidden: true });
+      file.onchange = async () => {
+        if (!file.files.length) return;
+        try {
+          say("Sending picture…");
+          const jpeg = await toJpeg320(file.files[0]);
+          const res = await fetch("/api/robots/" + encodeURIComponent(c.id) + "/picture", {
+            method: "POST", headers: { "Content-Type": "image/jpeg" }, body: jpeg,
+          });
+          say(res.ok ? `Sent picture (${Math.round(jpeg.size / 1024)} KB)` : "Failed: " + (await res.text()).trim());
+        } catch (err) {
+          say("Failed: " + err.message);
+        }
+        file.value = "";
+      };
+      row.push(file, el("button", { textContent: "Send picture", onclick: () => file.click() }));
+    }
+    if (has("face")) row.push(el("button", { className: "soft", textContent: "Face", onclick: () => run("face") }));
+    if (row.length) sections.push(el("div", { className: "row", style: "margin-top:8px" }, row));
+  }
+
+  if (has("camera") || has("mic")) {
+    const media = { ws: null, video: false, audio: false, frames: 0, bytes: 0, audioCtx: null, playAt: 0, lastUrl: "" };
+    const img = el("img", { alt: "Robot camera", hidden: true,
+      style: "width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:10px;background:#000;margin-top:8px" });
+    const info = el("div", { className: "muted stats" });
+    const watch = el("button", { className: "soft", textContent: "Watch" });
+    const listen = el("button", { className: "soft", textContent: "Listen" });
+
+    const playPcm = (u8) => {
+      const pcm = new Int16Array(u8.slice().buffer);  // copy: Int16Array needs 2-byte alignment
+      const buf = media.audioCtx.createBuffer(1, pcm.length, 16000);
+      const ch = buf.getChannelData(0);
+      for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i] / 32768;
+      const src = media.audioCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(media.audioCtx.destination);
+      const now = media.audioCtx.currentTime;
+      // ~100 ms jitter buffer; resync when starved or when lagging too far behind
+      if (media.playAt < now + 0.02 || media.playAt > now + 0.6) media.playAt = now + 0.1;
+      src.start(media.playAt);
+      media.playAt += buf.duration;
+    };
+
+    const reopen = () => {
+      if (media.ws) { media.ws.onclose = null; media.ws.close(); media.ws = null; }
+      watch.textContent = media.video ? "Stop video" : "Watch";
+      listen.textContent = media.audio ? "Stop audio" : "Listen";
+      img.hidden = !media.video;
+      if (!media.video && !media.audio) { info.textContent = ""; return; }
+      const q = `video=${media.video ? 1 : 0}&audio=${media.audio ? 1 : 0}`;
+      const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/robots/${encodeURIComponent(c.id)}/media?${q}`);
+      ws.binaryType = "arraybuffer";
+      ws.onmessage = (ev) => {
+        const u8 = new Uint8Array(ev.data);
+        media.bytes += u8.length;
+        if (u8[0] === 0x01) {
+          media.frames++;
+          const url = URL.createObjectURL(new Blob([u8.subarray(1)], { type: "image/jpeg" }));
+          img.src = url;
+          if (media.lastUrl) URL.revokeObjectURL(media.lastUrl);
+          media.lastUrl = url;
+        } else if (u8[0] === 0x02 && media.audioCtx) {
+          playPcm(u8.subarray(1));
+        }
+      };
+      ws.onclose = () => { if (media.ws === ws) { info.textContent = "Media stream closed"; } };
+      media.ws = ws;
+      info.textContent = "Waiting for the robot…";
+    };
+    watch.onclick = () => { media.video = !media.video; reopen(); };
+    listen.onclick = () => {
+      media.audio = !media.audio;
+      if (media.audio && !media.audioCtx) media.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (media.audioCtx) media.audioCtx.resume();
+      reopen();
+    };
+    setInterval(() => {
+      if (media.ws) info.textContent = `${media.video ? media.frames + " fps · " : ""}${Math.round(media.bytes / 1024)} KB/s`;
+      media.frames = 0;
+      media.bytes = 0;
+    }, 1000);
+    sections.push(el("h2", { textContent: "Camera & mic" }),
+      el("div", { className: "row" }, [has("camera") && watch, has("mic") && listen].filter(Boolean)), img, info);
+  }
+
   c.eventList = el("ul", { className: "events" });
   sections.push(el("h2", { textContent: "Events" }), c.eventList, status);
   c.root = el("section", { className: "card" }, sections);
@@ -266,7 +372,8 @@ function makeCard(r) {
     if (c.pingBtn) c.pingBtn.disabled = !r.online || c.pinging;
   };
   c.addEvent = (ev) => {
-    c.events.unshift(new Date(ev.ts).toLocaleTimeString() + "  " + ev.name.replaceAll("_", " "));
+    const where = ev.data && "x" in ev.data ? ` (${ev.data.x}, ${ev.data.y})` : "";
+    c.events.unshift(new Date(ev.ts).toLocaleTimeString() + "  " + ev.name.replaceAll("_", " ") + where);
     c.events.length = Math.min(c.events.length, 8);
     c.eventList.replaceChildren(...c.events.map((t) => el("li", { textContent: t })));
   };

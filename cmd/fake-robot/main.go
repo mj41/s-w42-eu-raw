@@ -5,10 +5,16 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"flag"
 	"fmt"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"net/http"
 	"os"
@@ -21,7 +27,8 @@ import (
 )
 
 // Same command set as the firmware (see wire.RobotCommandBody).
-var commands = []string{"ping", "nod", "shake", "look", "home", "emotion", "say", "leds", "brightness", "volume"}
+var commands = []string{"ping", "nod", "shake", "look", "home", "emotion", "say", "leds", "brightness", "volume",
+	"sticker", "face", "image", "camera", "mic"}
 
 func main() {
 	var (
@@ -62,6 +69,9 @@ type robot struct {
 	started             time.Time
 	battery, yaw, pitch float64
 	brightness, volume  float64
+	cameraOn, micOn     bool
+	frame               int     // camera frames sent, drives the test pattern
+	phase               float64 // microphone tone phase
 	log                 *slog.Logger
 }
 
@@ -120,7 +130,12 @@ func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) e
 		defer t.Stop()
 		eventTick = t.C
 	}
-	fakeEvents := []string{"head_press", "head_swipe_forward", "shake", "pickup"}
+	fakeEvents := []string{"head_press", "head_swipe_forward", "shake", "screen_tap"}
+	videoTick := time.NewTicker(200 * time.Millisecond) // 5 fps, like the firmware
+	defer videoTick.Stop()
+	audioTick := time.NewTicker(40 * time.Millisecond) // 40 ms PCM chunks
+	defer audioTick.Stop()
+	sendBinary := func(msg []byte) error { return ws.WriteMessage(websocket.BinaryMessage, msg) }
 
 	for {
 		var err error
@@ -135,9 +150,20 @@ func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) e
 		case <-heartbeat.C:
 			err = send(wire.KindHeartbeat, nil)
 		case <-eventTick:
-			name := fakeEvents[rand.IntN(len(fakeEvents))]
-			r.log.Info("robot event", "name", name)
-			err = send(wire.KindRobotEvent, wire.RobotEventBody{Name: name})
+			ev := wire.RobotEventBody{Name: fakeEvents[rand.IntN(len(fakeEvents))]}
+			if ev.Name == "screen_tap" {
+				ev.Data = map[string]any{"x": rand.IntN(320), "y": rand.IntN(240)}
+			}
+			r.log.Info("robot event", "name", ev.Name, "data", ev.Data)
+			err = send(wire.KindRobotEvent, ev)
+		case <-videoTick.C:
+			if r.cameraOn {
+				err = sendBinary(r.cameraFrame())
+			}
+		case <-audioTick.C:
+			if r.micOn {
+				err = sendBinary(r.micChunk(40 * time.Millisecond))
+			}
 		}
 		if err != nil {
 			return err
@@ -165,6 +191,10 @@ func (r *robot) handle(c received, send func(string, any) error) error {
 		}
 	case "home":
 		r.yaw, r.pitch = 0, 45
+	case "camera":
+		r.cameraOn, _ = c.cmd.Args["on"].(bool)
+	case "mic":
+		r.micOn, _ = c.cmd.Args["on"].(bool)
 	case "brightness":
 		if v, ok := num("value"); ok {
 			r.brightness = max(1, min(100, v))
@@ -194,11 +224,18 @@ func (r *robot) telemetry() map[string]float64 {
 
 func readLoop(ws *websocket.Conn, cmds chan<- received, log *slog.Logger) error {
 	for {
-		_, data, err := ws.ReadMessage()
+		kind, data, err := ws.ReadMessage()
 		if err != nil {
 			return err
 		}
 		at := time.Now()
+		if kind == websocket.BinaryMessage {
+			if len(data) > 1 && data[0] == wire.BinShowJPEG {
+				cfg, err := jpeg.DecodeConfig(bytes.NewReader(data[1:]))
+				log.Info("picture received", "bytes", len(data)-1, "width", cfg.Width, "height", cfg.Height, "err", err)
+			}
+			continue
+		}
 		frames, err := wire.Parse(data)
 		if err != nil {
 			log.Warn("bad frame", "err", err)
@@ -239,4 +276,38 @@ func defaultTokenFile() string {
 		return "robot-token"
 	}
 	return filepath.Join(dir, "stackchan-server", "robot-token")
+}
+
+// cameraFrame is a 320x240 test pattern: a gradient with a moving square.
+func (r *robot) cameraFrame() []byte {
+	r.frame++
+	img := image.NewRGBA(image.Rect(0, 0, 320, 240))
+	for y := 0; y < 240; y++ {
+		for x := 0; x < 320; x++ {
+			img.Set(x, y, color.RGBA{uint8(x * 255 / 320), uint8(y * 255 / 240), uint8(r.frame * 8), 255})
+		}
+	}
+	sx := (r.frame * 12) % 280
+	for y := 100; y < 140; y++ {
+		for x := sx; x < sx+40; x++ {
+			img.Set(x, y, color.White)
+		}
+	}
+	var buf bytes.Buffer
+	buf.WriteByte(wire.BinCameraJPEG)
+	jpeg.Encode(&buf, img, &jpeg.Options{Quality: 50})
+	return buf.Bytes()
+}
+
+// micChunk is a quiet 440 Hz tone, s16le mono 16 kHz.
+func (r *robot) micChunk(d time.Duration) []byte {
+	n := int(d.Seconds() * 16000)
+	out := make([]byte, 1, 1+2*n)
+	out[0] = wire.BinAudioPCM
+	for i := 0; i < n; i++ {
+		s := int16(3000 * math.Sin(r.phase))
+		r.phase += 2 * math.Pi * 440 / 16000
+		out = binary.LittleEndian.AppendUint16(out, uint16(s))
+	}
+	return out
 }

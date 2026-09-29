@@ -47,6 +47,7 @@ type Server struct {
 	sessions map[string]map[string]bool // browser session id -> paired robot ids
 	subs     map[*subscriber]struct{}   // open SSE streams
 	pings    map[string]pendingPing     // "robot/ping id" -> in-flight ping
+	media    map[*mediaSub]struct{}     // browser media sockets
 }
 
 type pairCode struct {
@@ -62,6 +63,8 @@ type robotState struct {
 	lastSeen    time.Time
 	telemetry   map[string]float64
 	telemetryAt time.Time
+	cameraOn    bool // what the server last asked the robot
+	micOn       bool
 }
 
 // robotView is the browser-facing JSON for one robot.
@@ -102,6 +105,7 @@ func New(cfg Config) *Server {
 		sessions: map[string]map[string]bool{},
 		subs:     map[*subscriber]struct{}{},
 		pings:    map[string]pendingPing{},
+		media:    map[*mediaSub]struct{}{},
 	}
 }
 
@@ -114,6 +118,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/robots", s.handleListRobots)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("POST /api/robots/{id}/command", s.handleCommand)
+	mux.HandleFunc("POST /api/robots/{id}/picture", s.handlePicture)
+	mux.HandleFunc("GET /api/robots/{id}/media", s.handleMedia)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok\n")) })
 	return mux
 }
@@ -137,6 +143,8 @@ func (s *Server) attach(c *robotConn, reg wire.RegisterBody) {
 	st.caps = reg.Capabilities
 	st.labels = reg.Labels
 	st.lastSeen = time.Now()
+	// A fresh connection starts with camera and mic off (see handleRobotConnect).
+	st.cameraOn, st.micOn = false, false
 	s.mu.Unlock()
 
 	if old != nil {
@@ -234,11 +242,11 @@ func (s *Server) publish(robotID, session string, ev sseEvent) {
 }
 
 // robotEvent forwards something that happened on the robot to paired browsers.
-func (s *Server) robotEvent(id, name string) {
+func (s *Server) robotEvent(id string, ev wire.RobotEventBody) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.publish(id, "", sseEvent{name: "robot_event", data: mustJSON(map[string]any{
-		"robot": id, "name": name, "ts": time.Now(),
+		"robot": id, "name": ev.Name, "data": ev.Data, "ts": time.Now(),
 	})})
 }
 

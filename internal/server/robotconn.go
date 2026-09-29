@@ -17,7 +17,7 @@ const (
 	pongWait        = 60 * time.Second
 	writeWait       = 10 * time.Second
 	registerTimeout = 10 * time.Second
-	maxMessageBytes = 64 << 10
+	maxMessageBytes = 256 << 10 // camera frames and pictures travel as binary messages
 )
 
 var robotIDPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
@@ -30,10 +30,16 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
+// outMsg is one queued WebSocket message to a robot.
+type outMsg struct {
+	binary bool
+	data   []byte
+}
+
 type robotConn struct {
 	id   string
 	ws   *websocket.Conn
-	send chan []byte
+	send chan outMsg
 
 	closeOnce sync.Once
 	done      chan struct{}
@@ -46,12 +52,21 @@ func (c *robotConn) close() {
 	})
 }
 
-// enqueue queues a frame for the writer; false if the robot is gone or stuck.
+// enqueue queues a JSON frame for the writer; false if the robot is gone or stuck.
 func (c *robotConn) enqueue(frame []byte) bool {
+	return c.queue(outMsg{data: frame})
+}
+
+// enqueueBinary queues a binary message (type byte + payload, see wire.Bin*).
+func (c *robotConn) enqueueBinary(msg []byte) bool {
+	return c.queue(outMsg{binary: true, data: msg})
+}
+
+func (c *robotConn) queue(m outMsg) bool {
 	select {
 	case <-c.done:
 		return false
-	case c.send <- frame:
+	case c.send <- m:
 		return true
 	default:
 		return false
@@ -76,7 +91,7 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws.SetReadLimit(maxMessageBytes)
-	c := &robotConn{id: id, ws: ws, send: make(chan []byte, 32), done: make(chan struct{})}
+	c := &robotConn{id: id, ws: ws, send: make(chan outMsg, 32), done: make(chan struct{})}
 	defer c.close()
 
 	reg, reason := readRegister(ws, id)
@@ -99,6 +114,10 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 		c.enqueue(f)
 	}
 	s.sendPairCode(c)
+	// Turn camera and mic back on if browsers were already watching.
+	s.mu.Lock()
+	s.syncMedia(id)
+	s.mu.Unlock()
 
 	go s.writeLoop(c)
 	s.readLoop(c)
@@ -147,9 +166,13 @@ func (s *Server) writeLoop(c *robotConn) {
 		select {
 		case <-c.done:
 			return
-		case f := <-c.send:
+		case m := <-c.send:
+			kind := websocket.TextMessage
+			if m.binary {
+				kind = websocket.BinaryMessage
+			}
 			c.ws.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := c.ws.WriteMessage(websocket.TextMessage, f); err != nil {
+			if err := c.ws.WriteMessage(kind, m.data); err != nil {
 				c.close()
 				return
 			}
@@ -174,11 +197,15 @@ func (s *Server) readLoop(c *robotConn) {
 	})
 
 	for {
-		_, data, err := c.ws.ReadMessage()
+		kind, data, err := c.ws.ReadMessage()
 		if err != nil {
 			return
 		}
 		resetDeadline()
+		if kind == websocket.BinaryMessage {
+			s.relayMedia(c.id, data)
+			continue
+		}
 		frames, err := wire.Parse(data)
 		if err != nil {
 			s.log.Warn("bad frame from robot", "robot", c.id, "err", err)
@@ -201,7 +228,7 @@ func (s *Server) handleRobotFrame(c *robotConn, f wire.Frame) {
 			return
 		}
 		s.log.Info("robot event", "robot", c.id, "name", body.Name)
-		s.robotEvent(c.id, body.Name)
+		s.robotEvent(c.id, body)
 	case wire.KindRobotPong:
 		var body wire.RobotPongBody
 		if err := f.Decode(&body); err != nil {

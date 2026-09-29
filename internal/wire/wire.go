@@ -98,16 +98,30 @@ type PairedBody struct {
 //	leds       {"left": "#rrggbb", "right": "#rrggbb"}
 //	brightness {"value": 1..100}
 //	volume     {"value": 0..100}
+//	sticker    {"name": "heart|angry|sweat|shy|dizzy", "seconds": 3}  decoration over the face
+//	face                                       back to the face after a picture
+//	image                                      (no JSON: pictures arrive as BinShowJPEG)
+//	camera     {"on": bool}                    sent by the server while browsers watch
+//	mic        {"on": bool}                    sent by the server while browsers listen
 type RobotCommandBody struct {
 	Command string         `json:"command"`
 	Args    map[string]any `json:"args,omitempty"`
 }
 
-// RobotEventBody reports something that happened on the robot, e.g. "shake",
-// "pickup", "head_press", "head_swipe_forward", "head_swipe_backward".
+// RobotEventBody reports something that happened on the robot: "shake",
+// "head_press", "head_swipe_forward", "head_swipe_backward", or "screen_tap"
+// with data {"x", "y"} in screen pixels (320x240).
 type RobotEventBody struct {
-	Name string `json:"name"`
+	Name string         `json:"name"`
+	Data map[string]any `json:"data,omitempty"`
 }
+
+// Binary WebSocket messages: one type byte, then the payload.
+const (
+	BinCameraJPEG byte = 0x01 // robot -> server -> browser: camera frame (JPEG)
+	BinAudioPCM   byte = 0x02 // robot -> server -> browser: microphone, s16le mono 16 kHz
+	BinShowJPEG   byte = 0x10 // server -> robot: picture (JPEG, 320x240) shown instead of the face
+)
 
 // RobotPongBody answers the "ping" command. QueueMs is how long the ping
 // waited on the robot between arriving and being handled.
