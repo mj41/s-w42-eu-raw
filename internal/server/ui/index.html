@@ -390,7 +390,8 @@ function makeCard(r) {
     const lastRow = el("div", { className: "row", hidden: true, style: "margin-top:6px" });
     const saved = el("div", { className: "row", style: "margin-top:8px" });
     const renderSaved = () => saved.replaceChildren(...load().map((code, i) => el("span", { className: "irsaved" }, [
-      el("button", { className: "soft", textContent: code.name, onclick: () => irSend(code, "IR " + code.name) }),
+      el("button", { className: "soft", textContent: code.name,
+        title: code.raw ? "raw code" : `NEC ${hex(code.address)} / ${hex(code.command)}`, onclick: () => irSend(code, "IR " + code.name) }),
       el("button", { className: "soft", textContent: "✕", title: "Forget " + code.name,
         onclick: () => { const codes = load(); codes.splice(i, 1); store(codes); renderSaved(); } }),
     ])));
@@ -405,6 +406,7 @@ function makeCard(r) {
       const code = nec ? { address: d.address, command: d.command } : { raw: d.raw };
       last.textContent = "Last received: " + (nec ? `NEC address ${hex(d.address)}, command ${hex(d.command)}`
         : `raw, ${(d.raw || "").split(",").length} timings`);
+      if (nec && c.fillNec) c.fillNec(d.address, d.command);
       lastRow.hidden = false;
       lastRow.replaceChildren(
         el("button", { className: "soft", textContent: "Send again", onclick: () => irSend(code, "IR code again") }),
@@ -415,13 +417,26 @@ function makeCard(r) {
           renderSaved();
         } }));
     };
+    // NEC by hand: address/command (hex like 0x80 or decimal), filled in by the last received code;
+    // "Add to list" saves them under a name as another button.
     const addr = el("input", { className: "code", value: "0x00", ariaLabel: "NEC address" });
     const cmd = el("input", { className: "code", value: "0x00", ariaLabel: "NEC command" });
+    const name = el("input", { className: "code", style: "width:150px", placeholder: "Name, e.g. Power", ariaLabel: "Name for the code" });
+    const necCode = () => ({ address: Number(addr.value) || 0, command: Number(cmd.value) || 0 });
+    c.fillNec = (address, command) => { addr.value = hex(address); cmd.value = hex(command); };
     sections.push(el("h2", { textContent: "Infrared" }), last, lastRow, saved,
       el("div", { className: "row", style: "margin-top:8px" }, [
         el("span", { className: "muted", textContent: "NEC address / command" }), addr, cmd,
-        el("button", { className: "soft", textContent: "Send",
-          onclick: () => run("ir_send", { address: Number(addr.value) || 0, command: Number(cmd.value) || 0 }, "IR NEC") }),
+        el("button", { className: "soft", textContent: "Send", onclick: () => irSend(necCode(), "IR NEC") }),
+      ]),
+      el("div", { className: "row", style: "margin-top:8px" }, [
+        name,
+        el("button", { className: "soft", textContent: "Add to list", onclick: () => {
+          const code = necCode();
+          store([...load(), { name: name.value.trim() || `NEC ${hex(code.address)}/${hex(code.command)}`, ...code }]);
+          name.value = "";
+          renderSaved();
+        } }),
       ]),
       el("div", { className: "row", style: "margin-top:8px" }, [
         // 3 s of 38 kHz light (three 1 s marks): long enough to see the LED through a phone camera.
