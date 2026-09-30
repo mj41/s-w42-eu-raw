@@ -125,7 +125,8 @@ type RobotCommandBody struct {
 // or text), "nfc_removed" with {"uid"}, "proximity_near" / "proximity_far"
 // with {"value"} (someone came close / left), "ir_received" with {"protocol":
 // "nec" or "raw", "address", "command" (NEC), "raw": "mark,space,..." (us)},
-// and screensaver/standby events.
+// "power_button" with {"press": "short" or "long"}, "usb_plugged", "usb_unplugged",
+// "battery_inserted", "battery_removed", and screensaver/standby events.
 type RobotEventBody struct {
 	Name string         `json:"name"`
 	Data map[string]any `json:"data,omitempty"`

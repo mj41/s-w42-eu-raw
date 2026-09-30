@@ -176,6 +176,17 @@ const SENSOR_LABELS = {
   yaw_temp_c: ["Yaw servo temp", " °C"], pitch_temp_c: ["Pitch servo temp", " °C"],
   servo_voltage_v: ["Servo supply", " V"], chip_temp_c: ["Chip temp", " °C"],
   light_lux: ["Light", " lux"], proximity: ["Proximity", " (0–2047)"],
+  body_battery_v: ["Body battery", " V"], body_current_ma: ["Body current", " mA"], body_power_mw: ["Body power", " mW"],
+  body_shunt_uv: ["Body shunt (raw)", " µV"],
+  core_battery_v: ["Core battery", " V"], core_vbus_v: ["USB input", " V"], core_system_v: ["Core system", " V"],
+  core_charge: ["Core charge", ""], core_charge_phase: ["Charge phase", ""], pmic_temp_c: ["Power chip temp", " °C"],
+  pmic_status1: ["PMIC status 1 (raw)", ""], pmic_status2: ["PMIC status 2 (raw)", ""],
+};
+// Values shown as words instead of numbers.
+const SENSOR_FORMAT = {
+  core_charge: (v) => ["idle", "charging", "discharging"][v] ?? v,
+  core_charge_phase: (v) => ["trickle", "pre-charge", "constant current", "constant voltage", "done", "not charging"][v] ?? v,
+  pmic_status1: (v) => hex(v), pmic_status2: (v) => hex(v),
 };
 
 function el(tag, props = {}, children = []) {
@@ -833,7 +844,8 @@ function makeCard(r) {
     }
     c.sensorTable.replaceChildren(...sensorKeys.map((k) => {
       const [label, unit] = SENSOR_LABELS[k];
-      return el("tr", {}, [el("td", { textContent: label }), el("td", { textContent: r.telemetry[k] + unit })]);
+      const v = SENSOR_FORMAT[k] ? SENSOR_FORMAT[k](r.telemetry[k]) : r.telemetry[k] + unit;
+      return el("tr", {}, [el("td", { textContent: label }), el("td", { textContent: v })]);
     }));
     c.table.replaceChildren(...(keys.length ? keys.map((k) => {
       const [label, unit] = TELEMETRY_LABELS[k] || [k, ""];
@@ -875,6 +887,7 @@ function makeCard(r) {
     const d = ev.data || {};
     const where = "x" in d ? ` (${d.x}, ${d.y})`
       : "manual" in d ? (d.manual ? " (manual)" : " (auto)")
+      : "press" in d ? ` (${d.press})`
       : "z0" in d ? ` (zones ${d.z0}·${d.z1}·${d.z2})`
       : "ms" in d ? ` (${d.ms} ms)`
       : "value" in d ? ` (${d.value})`
