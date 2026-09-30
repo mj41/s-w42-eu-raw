@@ -445,7 +445,7 @@ function makeCard(r) {
       if (c.irSelfTest && nec && d.address === 0xEE && d.command === 0x11) {
         c.irSelfTest.ok = true;
         last.textContent = "Self-test OK: the robot heard its own 38 kHz signal, so the transmitter works. " +
-          "If a device does not react, aim the robot's face at it from closer.";
+          "If a device does not react, point the top of the robot (the IR LED) at it from closer.";
         return;
       }
       const code = nec ? { address: d.address, command: d.command } : { raw: d.raw };
@@ -499,7 +499,7 @@ function makeCard(r) {
             c.irSelfTest = null;
           }, 2500);
         } }),
-        el("span", { className: "muted", textContent: "The IR LED is next to the camera: aim the robot's face at the device. The proximity sensor can be switched off under Settings." }),
+        el("span", { className: "muted", textContent: "The IR LED is on top of the robot, near the display unit: point the top at the device. (The LED blinking next to the camera is the proximity sensor; it can be switched off under Settings.)" }),
       ]));
     renderSaved();
   }
