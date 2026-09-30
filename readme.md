@@ -129,7 +129,7 @@ The first byte is the type, followed by the payload.
 |---|---|---|
 | `0x01` | robot → server → browser | camera frame, JPEG |
 | `0x02` | robot → server → browser | microphone: sample rate (uint16 LE), then s16le mono PCM |
-| `0x04` | robot → server → browser | microphone, all codec channels: sample rate (uint16 LE), channel count (uint8), then interleaved s16le PCM (on StackChan: channel 1 is the microphone, channel 0 the speaker reference, i.e. what the robot plays, looped back for echo cancellation; the dashboard plays either or both as stereo) |
+| `0x04` | robot → server → browser | microphone, all codec channels: sample rate (uint16 LE), channel count (uint8), then interleaved s16le PCM (on StackChan: channel 1 is the microphone, channel 0 the speaker reference, i.e. what the robot plays, looped back for echo cancellation; the dashboard plays either one) |
 | `0x05` | robot → server → browser | raw IMU while a browser has `?imu=1` open: count (uint16 LE), then per sample time (uint32 LE ms) and 9 float32 LE: accel m/s², gyro °/s, magnetic µT |
 | `0x03` | browser → server → robot | speaker: sample rate (uint16 LE), then s16le mono PCM. Sent on the media socket; forwarded only to robots that list `speaker` |
 | `0x10` | server → robot | picture, JPEG 320x240, shown instead of the face |
