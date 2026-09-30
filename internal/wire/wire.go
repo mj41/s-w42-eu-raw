@@ -112,6 +112,7 @@ type PairedBody struct {
 //	ir_send    {"address", "command"} (NEC) or {"raw": "9000,4500,...", "carrier_hz"}  infrared, us mark/space
 //	power_led  {"mode": "on|off|blink|fast|charging"}  the red power/charge LED
 //	proximity  {"on": bool}                    proximity sensor (its IR LED); on after boot
+//	hold       {"seconds": 30..300}            keep the head servos powered (0 = release now)
 type RobotCommandBody struct {
 	Command string         `json:"command"`
 	Args    map[string]any `json:"args,omitempty"`
@@ -126,7 +127,8 @@ type RobotCommandBody struct {
 // with {"value"} (someone came close / left), "ir_received" with {"protocol":
 // "nec" or "raw", "address", "command" (NEC), "raw": "mark,space,..." (us)},
 // "power_button" with {"press": "short" or "long"}, "usb_plugged", "usb_unplugged",
-// "battery_inserted", "battery_removed", and screensaver/standby events.
+// "battery_inserted", "battery_removed", "hold_on" {"seconds"} / "hold_off",
+// and screensaver/standby events.
 type RobotEventBody struct {
 	Name string         `json:"name"`
 	Data map[string]any `json:"data,omitempty"`

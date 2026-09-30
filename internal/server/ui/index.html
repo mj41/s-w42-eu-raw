@@ -167,7 +167,7 @@ const TELEMETRY_LABELS = {
   battery_pct: ["Battery", "%"], charging: ["Charging", ""], head_yaw_deg: ["Head yaw", "°"],
   head_pitch_deg: ["Head pitch", "°"], wifi_rssi_dbm: ["Wi-Fi", " dBm"], free_heap_kb: ["Free memory", " kB"],
   uptime_s: ["Uptime", " s"], brightness_pct: ["Brightness", "%"], volume_pct: ["Volume", "%"],
-  screensaver: ["Screensaver", ""],
+  screensaver: ["Screensaver", ""], hold_s: ["Head hold", " s left"],
 };
 // Shown in their own table, in this order.
 const SENSOR_LABELS = {
@@ -700,6 +700,18 @@ function makeCard(r) {
         slider("Pitch", 5, 85, "head_pitch_deg", "°", look, head),  // M5Stack: keep the Y servo within 5..85°
       ]));
     }
+    if (has("hold")) {
+      // Off by default: the servos go slack at rest (the head can be turned by hand, no hum,
+      // less battery). Hold keeps them powered at the current angle for a limited time.
+      const holdSel = el("select", { className: "select", ariaLabel: "Hold the head position" },
+        [["0", "Off"], ["30", "30 s"], ["60", "1 min"], ["120", "2 min"], ["300", "5 min"]].map(([v, t]) => el("option", { value: v, textContent: t })));
+      holdSel.onchange = () => run("hold", { seconds: +holdSel.value }, +holdSel.value ? `hold for ${holdSel.selectedOptions[0].textContent}` : "hold off");
+      c.holdSel = holdSel;
+      sections.push(el("div", { className: "row", style: "margin-top:8px" }, [
+        el("span", { className: "muted", textContent: "Hold position" }), holdSel,
+        el("span", { className: "muted", style: "font-size:0.85rem", textContent: "servos stay powered at the current angle, then go slack again" }),
+      ]));
+    }
   }
 
   if (has("speaker")) {
@@ -834,6 +846,9 @@ function makeCard(r) {
     const keys = Object.keys(r.telemetry).filter((k) => !(k in SENSOR_LABELS)).sort();
     const sensorKeys = Object.keys(SENSOR_LABELS).filter((k) => k in r.telemetry);
     c.sensorHead.hidden = c.sensorTable.hidden = !sensorKeys.length;
+    if (c.holdSel && r.telemetry.hold_s === 0 && c.holdSel.value !== "0" && document.activeElement !== c.holdSel) {
+      c.holdSel.value = "0"; // the hold ran out on the robot
+    }
     if (c.proxLabel && "proximity_on" in r.telemetry) {
       c.proxLabel.hidden = false;
       if (Date.now() - (c.proxTouched || 0) > 4000) c.proxBox.checked = r.telemetry.proximity_on > 0;
@@ -888,6 +903,7 @@ function makeCard(r) {
     const where = "x" in d ? ` (${d.x}, ${d.y})`
       : "manual" in d ? (d.manual ? " (manual)" : " (auto)")
       : "press" in d ? ` (${d.press})`
+      : "seconds" in d ? ` (${d.seconds} s)`
       : "z0" in d ? ` (zones ${d.z0}·${d.z1}·${d.z2})`
       : "ms" in d ? ` (${d.ms} ms)`
       : "value" in d ? ` (${d.value})`

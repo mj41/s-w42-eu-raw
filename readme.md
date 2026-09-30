@@ -15,7 +15,7 @@ For each paired robot:
 - **Status:** battery, charging, head yaw/pitch, Wi-Fi, free memory, uptime, brightness, volume.
 - **Latency:** "Ping ×10" splits the round trip into browser ↔ server, server ↔ robot, and the robot's app loop.
 - **Face:** six emotions, `say` (speech bubble).
-- **Head:** nod, shake, home, and yaw/pitch sliders with ±5/±15 chips. A slider holds your target and shows the robot's reported angle ("now …"). Pitch is limited to 5–85° (M5Stack's safe range).
+- **Head:** nod, shake, home, and yaw/pitch sliders with ±5/±15 chips. "Hold position" (Off by default; 30 s–5 min) keeps the servos powered at the current angle, then they go slack again. A slider holds your target and shows the robot's reported angle ("now …"). Pitch is limited to 5–85° (M5Stack's safe range).
 - **LEDs:** one colour for all 12 LEDs, "Random" (a random colour per LED, for a quick test) and "Off"; effects drawn by the robot (Rainbow, Breathe, Chase, Blink) in that colour at three speeds; and a picker per LED.
 - **Settings:** brightness and volume.
 - **Screen:** stickers over the face (heart, angry, sweat, shy, dizzy), 12 emoji (smile, grin, laugh, wink, love, cool, surprised, thinking, sleepy, cry, sob, angry) sent as a full-screen picture, or a picture from the phone. The picture is scaled to 320x240 in the browser and replaces the face until "Face".
@@ -115,6 +115,7 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 | `volume` | `{"value": 0..100}` |
 | `camera`, `mic` | `{"on": bool}`: sent by the server, not by browsers, while someone watches or listens |
 | `ir_send` | `{"address", "command"}` sends an NEC code; `{"raw": "9000,4500,562,…", "carrier_hz": 38000}` sends marks and spaces in µs (e.g. what `ir_received` reported). `"frames": 1..5` sends the whole frame that many times, 108 ms apart (for weak links; a toggle button may toggle twice). `"repeat": 0..20` is like holding the button: NEC repeat codes every 108 ms, or the raw frame again after 40 ms. `"loopback": true` lets the robot hear its own signal (self-test) |
+| `hold` | `{"seconds": 30..300}`: keep the head servos powered at the current angle (they go slack at rest otherwise); `0` releases now. Events `hold_on` `{"seconds"}` / `hold_off`, telemetry `hold_s` (seconds left) |
 | `proximity` | `{"on": bool}`: the proximity sensor, whose IR LED next to the camera pulses ~10×/s. Off stops the LED and the approach events; light and auto-brightness keep working. Telemetry `proximity_on` |
 | `power_led` | `{"mode": "on\|off\|blink\|fast\|charging"}`: the red power LED; `charging` hands it back to the charger |
 | `nfc` | `{"on": bool}`: NFC tag polling, on by default. Listed only when the robot found its reader |
