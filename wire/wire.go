@@ -130,6 +130,9 @@ type PairedBody struct {
 //	assets                                     answered by an "assets" event: {"list": "{\"files\": [{name, bytes, crc}]}", total, free}
 //	asset_delete {"name": "food/cake.png"}     answered by "asset_deleted" or "asset_error"
 //	asset upload                               (no JSON: files arrive as BinAssetChunk)
+//	sprite     {"id", "asset", "x", "y", "scale", "angle", "opacity", "z", "hidden", "ms"}  a stored picture over the face (x, y = center; ms = glide time)
+//	sprite_hide {"id"} / sprite_clear          remove one / all sprites
+//	picture    {"asset"}                       a stored picture instead of the face
 //	servo_power {"on": bool}                   power both head servos (off: limp)
 //	rotate     {"velocity": -1000..1000, "seconds": 1..30, "no_head_cable": true}  continuous yaw
 //	snapshot                                   full-resolution still, arrives as BinSnapshot
