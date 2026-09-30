@@ -397,8 +397,13 @@ function makeCard(r) {
     const storeKey = "stackchan-ir-" + c.id;
     const load = () => { try { return JSON.parse(localStorage.getItem(storeKey)) || []; } catch { return []; } };
     const store = (codes) => { try { localStorage.setItem(storeKey, JSON.stringify(codes)); } catch { /* private mode */ } };
-    const irSend = (code, label) =>
-      run("ir_send", code.raw ? { raw: code.raw } : { address: code.address, command: code.command }, label);
+    // Hold: like keeping the remote's button pressed. NEC gets repeat codes every 108 ms,
+    // raw codes are sent again every ~110 ms. Some receivers ignore a single short frame.
+    const hold = el("select", { className: "select", ariaLabel: "How long to hold the button" },
+      [["0", "Tap"], ["4", "Hold 0.5 s"], ["9", "Hold 1 s"], ["18", "Hold 2 s"]].map(([v, t]) =>
+        el("option", { value: v, textContent: t, selected: v === "4" })));
+    const irSend = (code, label) => run("ir_send",
+      { ...(code.raw ? { raw: code.raw } : { address: code.address, command: code.command }), repeat: +hold.value }, label);
     const last = el("div", { className: "muted", textContent: "Point a remote at the robot and press a button." });
     const lastRow = el("div", { className: "row", hidden: true, style: "margin-top:6px" });
     const saved = el("div", { className: "row", style: "margin-top:8px" });
@@ -440,7 +445,7 @@ function makeCard(r) {
     sections.push(el("h2", { textContent: "Infrared" }), last, lastRow, saved,
       el("div", { className: "row", style: "margin-top:8px" }, [
         el("span", { className: "muted", textContent: "NEC address / command" }), addr, cmd,
-        el("button", { className: "soft", textContent: "Send", onclick: () => irSend(necCode(), "IR NEC") }),
+        el("button", { className: "soft", textContent: "Send", onclick: () => irSend(necCode(), "IR NEC") }), hold,
       ]),
       el("div", { className: "row", style: "margin-top:8px" }, [
         name,
