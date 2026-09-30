@@ -51,6 +51,9 @@ type Server struct {
 	subs     map[*subscriber]struct{}   // open SSE streams
 	pings    map[string]pendingPing     // "robot/ping id" -> in-flight ping
 	media    map[*mediaSub]struct{}     // browser media sockets
+	joins    map[string]*joinRequest    // pending join requests by id (join.go)
+	// last join request per client IP, for rate limiting
+	joinLastByIP map[string]time.Time
 
 	saveNow   chan struct{} // asks RunStateSaver to save soon
 	saveMu    sync.Mutex    // serializes SaveState
@@ -122,7 +125,10 @@ func New(cfg Config) *Server {
 		subs:     map[*subscriber]struct{}{},
 		pings:    map[string]pendingPing{},
 		media:    map[*mediaSub]struct{}{},
+		joins:    map[string]*joinRequest{},
 		saveNow:  make(chan struct{}, 1),
+
+		joinLastByIP: map[string]time.Time{},
 	}
 	if cfg.StateFile != "" {
 		if err := s.loadState(); err != nil {
@@ -140,6 +146,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /pair", s.handlePair)
 	mux.HandleFunc("GET /api/robots", s.handleListRobots)
 	mux.HandleFunc("GET /api/info", s.handleInfo)
+	mux.HandleFunc("POST /api/join", s.handleJoinRequest)
+	mux.HandleFunc("POST /api/join/{id}/{decision}", s.handleJoinDecision)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("POST /api/robots/{id}/command", s.handleCommand)
 	mux.HandleFunc("POST /api/robots/{id}/picture", s.handlePicture)

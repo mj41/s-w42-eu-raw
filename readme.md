@@ -24,6 +24,7 @@ For each paired robot:
 - **Infrared:** point a TV remote at the robot and press a button: the last code shows up with "Send again" and "Save…" (a named button, kept in this browser). "NEC address / command" sends a code by hand (a received NEC code fills it in), and "Add to list" saves it under a name, so you can try a few commands side by side. "Test LED (3 s)" lights the IR LED long enough to see it through a phone camera; "Self-test" checks that the robot hears its own signal (carrier and timing).
 - **Power LED** (under LEDs): on, blink, fast, off, or "Charging" (the charger drives it).
 - **NFC:** "Reader on" / "Reader off". While on (the default), holding a tag or card near the robot adds an `nfc tag` event with its UID and type. For NTAG stickers it also shows the first NDEF record (a URL or text). Taking it away adds `nfc removed`.
+- **Adding a browser** (e.g. a laptop without a camera): on the "no robot paired" page, "Ask a paired phone" shows a short code; every paired browser gets a banner with the same code and **Allow** / **Deny**. Allow pairs the new browser with the approver's robots. Requests expire after 3 minutes and are rate-limited. The page can also pair with the 8-character code shown under the robot's QR code.
 - **Sensors:** a table fed by the robot's telemetry: acceleration per axis (g) and rotation rate, servo load and temperature, servo supply voltage, chip temperature, room light (lux) and proximity.
 - **Auto brightness** (under Settings, for robots with a light sensor): the robot sets its backlight from the room light. Moving the brightness slider switches it off.
 - **Proximity sensor** (under Settings): on/off. Its IR LED next to the camera blinks about 10 times a second; switch it off, e.g., while using infrared.
@@ -136,6 +137,8 @@ All endpoints need the session cookie of a browser that paired with the robot.
 | Endpoint | Purpose |
 |---|---|
 | `GET /pair?code=…` | QR target; adds the robot to this browser's session |
+| `POST /api/join` | an unpaired browser asks paired browsers for access; returns `{"id", "code", "from", "agent", "expires"}`. Paired browsers get a `join_request` SSE event (also replayed when they connect) |
+| `POST /api/join/{id}/approve`, `…/deny` | a paired browser answers; approve pairs the requester with the approver's robots. The requester gets `join_result` `{"status"}`, the other paired browsers `join_closed` |
 | `GET /api/robots` | paired robots (JSON) |
 | `GET /api/events` | SSE: `robot` (full state; telemetry `screensaver` 0 off / 1 auto / 2 manual), `robot_event` (to every paired browser; the last 20 are replayed on connect), `pong` (only to the browser that pinged) |
 | `POST /api/robots/{id}/command` | `{"command", "args"}` as JSON |

@@ -64,6 +64,8 @@
   .events li { padding: 3px 0; border-top: 1px solid var(--border); }
   .status { color: var(--muted); font-size: 0.9rem; min-height: 1.4em; margin-top: 12px; }
   .empty { color: var(--muted); }
+  .joinreq { background: var(--card); border: 2px solid var(--accent); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; }
+  .joincode { font: 600 1.3rem ui-monospace, monospace; letter-spacing: 0.06em; color: var(--text); }
   select.select { font: inherit; padding: 9px 10px; border-radius: 10px; border: 1px solid var(--border);
                   background: var(--bg); color: var(--text); }
   label.check { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 0.9rem; }
@@ -74,11 +76,22 @@
 <main>
   <h1>Stack-chan</h1>
   <p class="sub" id="conn">Connecting…</p>
+  <div id="joins"></div>
   <div id="robots"></div>
-  <p class="empty" id="empty" hidden>
-    No robot is paired with this browser yet. Open <b>Embody Mode</b> on the Stack-chan
-    and scan the QR code it shows.
-  </p>
+  <div class="empty" id="empty" hidden>
+    <p>No robot is paired with this browser yet. Open <b>Embody Mode</b> on the Stack-chan
+    and scan the QR code it shows, or:</p>
+    <div class="row">
+      <button id="join">Ask a paired phone</button>
+      <span id="joinStatus"></span>
+    </div>
+    <form id="codeForm" class="row" style="margin-top:12px">
+      <input id="codeInput" class="code" style="width:130px" placeholder="Robot code" autocomplete="off" aria-label="Robot code">
+      <button class="soft">Pair with code</button>
+    </form>
+    <p style="font-size:0.85rem">The robot code is the 8 characters under the QR code on its screen
+    (long-press the screen to show the QR again).</p>
+  </div>
 </main>
 <script>
 "use strict";
@@ -845,8 +858,74 @@ function upsert(r) {
   empty.hidden = cards.size > 0;
 }
 
+// Join requests (see server join.go): an unpaired browser asks, a paired one answers.
+const joinBtn = document.getElementById("join");
+const joinStatus = document.getElementById("joinStatus");
+const joinsBox = document.getElementById("joins");
+const joinBanners = new Map(); // request id -> banner
+joinBtn.onclick = async () => {
+  joinBtn.disabled = true;
+  try {
+    const res = await fetch("/api/join", { method: "POST" });
+    if (!res.ok) throw new Error((await res.text()).trim());
+    const j = await res.json();
+    joinStatus.replaceChildren("Waiting for approval on the phone. Code: ", el("span", { className: "joincode", textContent: j.code }));
+    setTimeout(() => {
+      if (!cards.size) { joinStatus.textContent = "The request expired."; joinBtn.disabled = false; }
+    }, Math.max(0, new Date(j.expires) - Date.now()));
+  } catch (err) {
+    joinStatus.textContent = err.message;
+    joinBtn.disabled = false;
+  }
+};
+document.getElementById("codeForm").onsubmit = (e) => {
+  e.preventDefault();
+  const code = document.getElementById("codeInput").value.trim();
+  if (code) location.href = "/pair?code=" + encodeURIComponent(code);
+};
+const closeJoin = (id) => {
+  const box = joinBanners.get(id);
+  if (box) { box.remove(); joinBanners.delete(id); }
+};
+const showJoin = (j) => {
+  if (joinBanners.has(j.id)) return;
+  const note = el("div", { className: "muted" });
+  const answer = async (decision) => {
+    try {
+      const res = await fetch(`/api/join/${encodeURIComponent(j.id)}/${decision}`, { method: "POST" });
+      if (!res.ok) throw new Error((await res.text()).trim());
+      closeJoin(j.id);
+    } catch (err) {
+      note.textContent = err.message;
+    }
+  };
+  const box = el("div", { className: "joinreq" }, [
+    el("div", { textContent: `${j.agent} at ${j.from} asks to control your robots.` }),
+    el("div", { style: "margin-top:4px" }, ["Code: ", el("span", { className: "joincode", textContent: j.code })]),
+    el("div", { className: "muted", style: "font-size:0.85rem", textContent: "Allow only if the browser you want to add shows the same code." }),
+    el("div", { className: "row", style: "margin-top:8px" }, [
+      el("button", { textContent: "Allow", onclick: () => answer("approve") }),
+      el("button", { className: "soft", textContent: "Deny", onclick: () => answer("deny") }),
+    ]),
+    note,
+  ]);
+  joinBanners.set(j.id, box);
+  joinsBox.append(box);
+  setTimeout(() => closeJoin(j.id), Math.max(0, new Date(j.expires) - Date.now()));
+};
+
 function connect() {
   const es = new EventSource("/api/events");
+  es.addEventListener("join_request", (ev) => showJoin(JSON.parse(ev.data)));
+  es.addEventListener("join_closed", (ev) => closeJoin(JSON.parse(ev.data).id));
+  es.addEventListener("join_result", (ev) => {
+    if (JSON.parse(ev.data).status === "approved") {
+      location.href = "/"; // paired now: reload, the robots come with the new stream
+    } else {
+      joinStatus.textContent = "The request was denied.";
+      joinBtn.disabled = false;
+    }
+  });
   es.addEventListener("open", () => { connLine.textContent = "Live"; });
   es.addEventListener("robot", (ev) => upsert(JSON.parse(ev.data)));
   es.addEventListener("pong", (ev) => {

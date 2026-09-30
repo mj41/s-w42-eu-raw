@@ -130,6 +130,14 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	s.mu.Lock()
+	joins := s.pendingJoins(session)
+	s.mu.Unlock()
+	for _, j := range joins { // requests that arrived while this browser was away
+		if !send(sseEvent{name: "join_request", data: mustJSON(j)}) {
+			return
+		}
+	}
 	fmt.Fprint(w, ": ready\n\n")
 	flusher.Flush()
 

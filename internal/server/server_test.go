@@ -625,3 +625,72 @@ func TestInfoAdvertisesHTTPS(t *testing.T) {
 		}
 	}
 }
+
+func TestJoinRequestApprovedByPairedBrowser(t *testing.T) {
+	ts, _ := newTestServer(t)
+	post := func(c *http.Client, path string) (int, map[string]any) {
+		t.Helper()
+		resp, err := c.Post(ts.URL+path, "application/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var body map[string]any
+		json.NewDecoder(resp.Body).Decode(&body)
+		return resp.StatusCode, body
+	}
+
+	laptop := newBrowser()
+	if code, _ := post(laptop, "/api/join"); code != http.StatusConflict {
+		t.Fatalf("join with nobody paired: %d, want 409", code)
+	}
+
+	robot := connectRobot(t, ts, "chan-1", wire.ClassRobot)
+	phone := pairBrowser(t, robot)
+	phoneEvents := openEvents(t, phone, ts)
+
+	code, req := post(laptop, "/api/join")
+	if code != http.StatusAccepted || req["code"] == "" {
+		t.Fatalf("join request: %d %v", code, req)
+	}
+	seen := waitForEvent(t, phoneEvents, "join_request")
+	if seen["id"] != req["id"] || seen["code"] != req["code"] {
+		t.Fatalf("phone saw %v, laptop asked %v", seen, req)
+	}
+	if c, _ := post(laptop, "/api/join/"+req["id"].(string)+"/approve"); c != http.StatusForbidden {
+		t.Fatalf("laptop approving itself: %d, want 403", c)
+	}
+	if c, _ := post(newBrowser(), "/api/join/"+req["id"].(string)+"/approve"); c != http.StatusForbidden {
+		t.Fatalf("stranger approving: %d, want 403", c)
+	}
+	if c, _ := post(phone, "/api/join/"+req["id"].(string)+"/approve"); c != http.StatusOK {
+		t.Fatalf("phone approving: %d", c)
+	}
+
+	resp, err := laptop.Get(ts.URL + "/api/robots")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var robots []robotView
+	json.NewDecoder(resp.Body).Decode(&robots)
+	resp.Body.Close()
+	if len(robots) != 1 || robots[0].ID != "chan-1" {
+		t.Fatalf("laptop robots after approval: %+v", robots)
+	}
+	if c, _ := post(phone, "/api/join/"+req["id"].(string)+"/approve"); c != http.StatusNotFound {
+		t.Fatalf("answering twice: %d, want 404", c)
+	}
+}
+
+func TestAgentSummary(t *testing.T) {
+	for ua, want := range map[string]string{
+		"Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Mobile Safari/537.36":                       "Chrome on Android",
+		"Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0":                                                                  "Firefox on Linux",
+		"Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1": "Safari on iOS",
+		"curl/8.0": "A browser",
+	} {
+		if got := agentSummary(ua); got != want {
+			t.Errorf("%q: %q, want %q", ua, got, want)
+		}
+	}
+}
