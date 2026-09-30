@@ -130,7 +130,8 @@ type PairedBody struct {
 //	assets                                     answered by an "assets" event: {"list": "{\"files\": [{name, bytes, crc}]}", total, free}
 //	asset_delete {"name": "food/cake.png"}     answered by "asset_deleted" or "asset_error"
 //	asset upload                               (no JSON: files arrive as BinAssetChunk)
-//	sprite     {"id", "asset", "x", "y", "scale", "angle", "opacity", "z", "hidden", "ms"}  a stored picture over the face (x, y = center; ms = glide time)
+//	sprite     {"id", "asset", "x", "y", "scale", "angle", "opacity", "z", "hidden", "ms", "tap"}  a stored picture over the face
+//	           (x, y = center; ms = glide time; tap: a button, reported in screen_tap)
 //	sprite_hide {"id"} / sprite_clear          remove one / all sprites
 //	picture    {"asset"}                       a stored picture instead of the face
 //	play       {"asset", "volume": 0..100}     a stored WAV (16-bit PCM); "sound_done" at the end; play_stop ends it
@@ -157,7 +158,10 @@ type RobotCommandBody struct {
 // RobotEventBody reports something that happened on the robot: "shake",
 // "head_press" with the zone intensities {"z0", "z1", "z2"} (0-3),
 // "head_release" with {"ms"}, "head_swipe_forward", "head_swipe_backward", "screen_tap"
-// with data {"x", "y"} in screen pixels (320x240), "nfc_tag" with data
+// and "screen_long_press" with data {"x", "y"} in screen pixels (320x240) and what the
+// finger hit: "sprite" (the topmost sprite with "tap"), its "asset", "sprite_x" and
+// "sprite_y" (the point in that picture's pixels), and "picture" (the full-screen
+// picture shown: its file, or "sent"), "nfc_tag" with data
 // {"uid", "type", "atqa", "sak", optional "text"} (the first NDEF record: URI
 // or text), "nfc_removed" with {"uid"}, "proximity_near" / "proximity_far"
 // with {"value"} (someone came close / left), "ir_received" with {"protocol":

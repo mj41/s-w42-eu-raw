@@ -1264,7 +1264,7 @@ function makeCard(r) {
     const d = ev.data || {};
     const where = ev.name === "assets" ? ` (${(() => { try { return JSON.parse(d.list).files.length; } catch { return "?"; } })()} files, ${Math.round((d.free || 0) / 1024)} KB free)`
       : ev.name.startsWith("asset_") ? ` ${d.name || ""}` + ("bytes" in d ? ` (${d.bytes} bytes)` : "") + (d.reason ? `: ${d.reason}` : "")
-      : "x" in d ? ` (${d.x}, ${d.y})`
+      : "x" in d ? ` (${d.x}, ${d.y})` + (d.sprite ? ` on ${d.sprite} (${d.sprite_x}, ${d.sprite_y})` : "") + (d.picture ? ` · picture ${d.picture}` : "")
       : "manual" in d ? (d.manual ? " (manual)" : " (auto)")
       : "list" in d ? ` (${(() => { try { return JSON.parse(d.list).length; } catch { return "?"; } })()} servers)`
       : "reg" in d ? ` ${hex(d.reg)} = ${d.value < 0 ? "failed" : hex(d.value)}`
