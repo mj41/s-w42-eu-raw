@@ -422,7 +422,8 @@ function makeCard(r) {
           !current && el("button", { className: "soft", textContent: "Switch", onclick: () => {
             if (confirm(`Switch ${c.id} to ${sv.name}? It leaves this server.`)) run("server_switch", { server: sv.url }, "switch to " + sv.name);
           } }),
-          !dflt && el("button", { className: "soft", textContent: "Make default", onclick: () => run("server_default", { server: sv.url }, "default " + sv.name) }),
+          !dflt && el("button", { className: "soft", textContent: "Pin as default", onclick: () => run("server_default", { server: sv.url }, "pin " + sv.name) }),
+          dflt && el("button", { className: "soft", textContent: "Unpin", onclick: () => run("server_default", { server: "" }, "no default: the robot asks at start") }),
           !current && sv.origin !== "built-in" && el("button", { className: "soft", textContent: "Remove", onclick: () => run("server_remove", { server: sv.url }, "remove " + sv.name) }),
         ].filter(Boolean));
       }));
@@ -435,7 +436,7 @@ function makeCard(r) {
           name.value = url.value = token.value = "";
         } })]),
       el("div", { className: "muted", style: "font-size:0.85rem;margin-top:6px",
-        textContent: "On the robot, the QR screen (QR button in the swipe-up bar) switches servers with Next and makes the shown one the default with ⌂." }));
+        textContent: "On the robot, the QR screen (QR button in the swipe-up bar) switches servers with Next and pins the shown one as the default with Pin (tap again to unpin: then the robot asks at start)." }));
   }
 
   if (has("nfc")) {

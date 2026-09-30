@@ -21,7 +21,7 @@ For each paired robot:
 - **Screen:** stickers over the face (heart, angry, sweat, shy, dizzy), 12 emoji (smile, grin, laugh, wink, love, cool, surprised, thinking, sleepy, cry, sob, angry) sent as a full-screen picture, or a picture from the phone. The picture is scaled to 320x240 in the browser and replaces the face until "Face".
 - **Live touch** (under Sensors): both fingers on the screen, drawn live (50 Hz) from the raw touch controller data. Events `touch_down` / `touch_up` (with duration) come from the same data.
 - **Camera extras:** "Snapshot 640×480" (shown below the video, with a download link), Mirror / Flip, and raw sensor registers (read / write, answer in Events).
-- **Servers:** the robot's server list (built-in, offered by servers with `-offer`, or added here with name, URL and robot token), with Switch, Make default and Remove. Tokens never leave the robot. On the robot, the QR screen switches with Next and ⌂ makes the shown server the default.
+- **Servers:** the robot's server list (built-in, offered by servers with `-offer`, or added here with name, URL and robot token), with Switch, Pin as default / Unpin and Remove. Tokens never leave the robot. On the robot, the QR screen switches with Next and Pin makes the shown server the default (tap again to unpin; with no default the robot starts as a chooser and contacts nothing until you press Connect).
 - **Head extras:** Servo power on/off, and Rotate ⟲ / Stop / ⟳ (continuous yaw, 3–30 s, only after ticking "No cable in the head's USB-C"; with USB power present the dashboard warns again).
 - **Live IMU** (under Sensors): raw accelerometer, gyro and magnetometer at 100 Hz while the button is on (the robot streams only while someone watches), with "Download CSV" of up to 60 s.
 - **Camera & mic:** live video (JPEG, about 5 fps) and the robot's microphone, played through Web Audio. The robot streams only while someone watches or listens, and shows a red LIVE badge meanwhile.
@@ -130,7 +130,7 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 | `rotate` | `{"velocity": -1000..1000, "seconds": 1..30, "no_head_cable": true}`: continuous yaw rotation, refused (`rotate_refused` `{"reason"}`) without `no_head_cable`, stopped by `velocity: 0`, by any other head command, standby or the time limit. Events `rotate_on` / `rotate_off`, telemetry `rotate_s` |
 | `touch_stream`, `imu_stream` | `{"on": bool}`: sent by the server while a browser has `?touch=1` / `?imu=1` open |
 | `server_add` | `{"url": "ws://…" or "wss://…", "name", "token"}`: add (or update) an entry in the robot's server list, stored on the robot |
-| `server_remove`, `server_default`, `server_switch` | `{"server": url or name}`: remove an entry (not the built-in or current one), make it the one used at start, or switch to it now (the robot leaves this server) |
+| `server_remove`, `server_default`, `server_switch` | `{"server": url or name}`: remove an entry (not the built-in or current one), make it the one used at start (`""` = no default: the robot starts as a chooser), or switch to it now (the robot leaves this server) |
 | `proximity` | `{"on": bool}`: the proximity sensor, whose IR LED next to the camera pulses ~10×/s. Off stops the LED and the approach events; light and auto-brightness keep working. Telemetry `proximity_on` |
 | `power_led` | `{"mode": "on\|off\|blink\|fast\|charging"}`: the red power LED; `charging` hands it back to the charger |
 | `nfc` | `{"on": bool}`: NFC tag polling, on by default. Listed only when the robot found its reader |
