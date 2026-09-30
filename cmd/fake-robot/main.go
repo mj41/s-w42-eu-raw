@@ -7,6 +7,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -29,7 +30,8 @@ import (
 // Same command set as the firmware (see wire.RobotCommandBody).
 var commands = []string{"ping", "nod", "shake", "look", "home", "emotion", "say", "leds", "brightness", "volume",
 	"sticker", "face", "image", "camera", "mic", "screensaver", "standby", "speaker", "nfc", "ir_send", "power_led",
-	"hold", "servo_power", "rotate", "snapshot", "camera_config", "camera_reg", "imu_stream", "touch_stream"}
+	"hold", "servo_power", "rotate", "snapshot", "camera_config", "camera_reg", "imu_stream", "touch_stream",
+	"server_add", "server_remove", "server_default", "server_switch"}
 
 func main() {
 	var (
@@ -79,9 +81,11 @@ type robot struct {
 	battery, yaw, pitch float64
 	brightness, volume  float64
 	cameraOn, micOn     bool
-	nfcOn               bool    // NFC polling, on by default like the firmware
-	screensaver         float64 // 0 off, 1 auto, 2 manual
-	afterStandby        bool    // report standby_end after the next connect
+	nfcOn               bool             // NFC polling, on by default like the firmware
+	screensaver         float64          // 0 off, 1 auto, 2 manual
+	afterStandby        bool             // report standby_end after the next connect
+	servers             []map[string]any // like the firmware's server list (no switching here)
+	serverDefault       string
 	frame               int     // camera frames sent, drives the test pattern
 	phase               float64 // microphone tone phase
 	log                 *slog.Logger
@@ -124,6 +128,9 @@ func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) e
 		},
 	}
 	if err := send(wire.KindRegister, reg); err != nil {
+		return err
+	}
+	if err := send(wire.KindRobotEvent, r.serversEvent(strings.TrimSuffix(url, wire.ConnectPath))); err != nil {
 		return err
 	}
 	if r.afterStandby {
@@ -390,3 +397,13 @@ func (r *robot) micChunk(d time.Duration) []byte {
 type standbyError struct{ d time.Duration }
 
 func (e standbyError) Error() string { return fmt.Sprintf("standby for %v", e.d) }
+
+// serversEvent reports the fake server list the way the firmware does (no tokens).
+func (r *robot) serversEvent(current string) wire.RobotEventBody {
+	if r.servers == nil {
+		r.servers = []map[string]any{{"name": "built-in", "url": current, "origin": "built-in", "token": true}}
+		r.serverDefault = current
+	}
+	list, _ := json.Marshal(r.servers)
+	return wire.RobotEventBody{Name: "servers", Data: map[string]any{"list": string(list), "current": current, "default": r.serverDefault}}
+}

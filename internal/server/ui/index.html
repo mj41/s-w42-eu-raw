@@ -403,6 +403,41 @@ function makeCard(r) {
     }
   }
 
+  if (has("server_switch")) {
+    // The robot's server list (from its "servers" event; tokens never leave the robot).
+    // Switching makes the robot leave this server and connect to the other one.
+    const list = el("div");
+    const name = el("input", { className: "code", style: "width:120px", placeholder: "Name", ariaLabel: "Server name" });
+    const url = el("input", { className: "code", style: "width:220px", placeholder: "wss://host or ws://host:8765", ariaLabel: "Server URL" });
+    const token = el("input", { className: "code", style: "width:150px", placeholder: "Robot token", type: "password", ariaLabel: "Robot token" });
+    c.onServers = (d) => {
+      let servers = [];
+      try { servers = JSON.parse(d.list || "[]"); } catch { /* keep empty */ }
+      list.replaceChildren(...servers.map((sv) => {
+        const current = sv.url === d.current, dflt = sv.url === d.default;
+        const tags = [current && "current", dflt && "default", sv.origin, sv.token ? "token" : "no token"].filter(Boolean).join(" · ");
+        return el("div", { className: "row", style: "margin-top:6px" }, [
+          el("span", { style: "min-width:120px", textContent: sv.name }),
+          el("span", { className: "muted", style: "font-size:0.85rem", textContent: `${sv.url} (${tags})` }),
+          !current && el("button", { className: "soft", textContent: "Switch", onclick: () => {
+            if (confirm(`Switch ${c.id} to ${sv.name}? It leaves this server.`)) run("server_switch", { server: sv.url }, "switch to " + sv.name);
+          } }),
+          !dflt && el("button", { className: "soft", textContent: "Make default", onclick: () => run("server_default", { server: sv.url }, "default " + sv.name) }),
+          !current && sv.origin !== "built-in" && el("button", { className: "soft", textContent: "Remove", onclick: () => run("server_remove", { server: sv.url }, "remove " + sv.name) }),
+        ].filter(Boolean));
+      }));
+    };
+    sections.push(el("h2", { textContent: "Servers" }), list,
+      el("div", { className: "row", style: "margin-top:10px" }, [name, url, token,
+        el("button", { className: "soft", textContent: "Add", onclick: () => {
+          if (!/^wss?:\/\//.test(url.value.trim())) { say("The URL must start with ws:// or wss://"); return; }
+          run("server_add", { name: name.value.trim(), url: url.value.trim(), token: token.value.trim() }, "add server");
+          name.value = url.value = token.value = "";
+        } })]),
+      el("div", { className: "muted", style: "font-size:0.85rem;margin-top:6px",
+        textContent: "On the robot, the QR screen (QR button in the swipe-up bar) switches servers with ◀ ▶ and makes the shown one the default with ⌂." }));
+  }
+
   if (has("nfc")) {
     sections.push(el("h2", { textContent: "NFC" }), el("div", { className: "row" }, [
       el("button", { className: "soft", textContent: "Reader on", onclick: () => run("nfc", { on: true }, "NFC reader on") }),
@@ -1101,9 +1136,11 @@ function makeCard(r) {
     }
     if (ev.name === "ir_received" && c.onIr) c.onIr(ev.data || {});
     if (ev.name === "nfc_tag" && c.onNfc) c.onNfc(ev.data || {});
+    if (ev.name === "servers" && c.onServers) c.onServers(ev.data || {});
     const d = ev.data || {};
     const where = "x" in d ? ` (${d.x}, ${d.y})`
       : "manual" in d ? (d.manual ? " (manual)" : " (auto)")
+      : "list" in d ? ` (${(() => { try { return JSON.parse(d.list).length; } catch { return "?"; } })()} servers)`
       : "reg" in d ? ` ${hex(d.reg)} = ${d.value < 0 ? "failed" : hex(d.value)}`
       : "press" in d ? ` (${d.press})`
       : "reason" in d ? `: ${d.reason}`

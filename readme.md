@@ -21,6 +21,7 @@ For each paired robot:
 - **Screen:** stickers over the face (heart, angry, sweat, shy, dizzy), 12 emoji (smile, grin, laugh, wink, love, cool, surprised, thinking, sleepy, cry, sob, angry) sent as a full-screen picture, or a picture from the phone. The picture is scaled to 320x240 in the browser and replaces the face until "Face".
 - **Live touch** (under Sensors): both fingers on the screen, drawn live (50 Hz) from the raw touch controller data. Events `touch_down` / `touch_up` (with duration) come from the same data.
 - **Camera extras:** "Snapshot 640×480" (shown below the video, with a download link), Mirror / Flip, and raw sensor registers (read / write, answer in Events).
+- **Servers:** the robot's server list (built-in, offered by servers with `-offer`, or added here with name, URL and robot token), with Switch, Make default and Remove. Tokens never leave the robot. On the robot, the QR screen switches with ◀ ▶ and ⌂ makes the shown server the default.
 - **Head extras:** Servo power on/off, and Rotate ⟲ / Stop / ⟳ (continuous yaw, 3–30 s, only after ticking "No cable in the head's USB-C"; with USB power present the dashboard warns again).
 - **Live IMU** (under Sensors): raw accelerometer, gyro and magnetometer at 100 Hz while the button is on (the robot streams only while someone watches), with "Download CSV" of up to 60 s.
 - **Camera & mic:** live video (JPEG, about 5 fps) and the robot's microphone, played through Web Audio. The robot streams only while someone watches or listens, and shows a red LIVE badge meanwhile.
@@ -54,6 +55,7 @@ go run ./cmd/fake-robot                    # simulated robot, in a second termin
 - `-public-url` sets the base URL put into QR codes. The default is `http://<LAN IP>:<port>`.
 - `-state-file` (default `~/.local/state/stackchan-server/state.json`, `""` disables) keeps pairings and known robots across restarts: browsers stay paired, and robots show up offline with their last telemetry and events until they reconnect. The whole file is rewritten every 5 s when something changed, right after a pairing, and on shutdown. It holds session IDs, so it is mode 0600. It is a stopgap until a real database.
 - `-tls-listen :8766` also serves the dashboard over HTTPS, for the phone's microphone ("Talk"). Without `-tls-cert`/`-tls-key` it creates a self-signed certificate for localhost, this host name and every local IP, and keeps it in `~/.config/stackchan-server/` so a phone accepts it only once. Robots stay on `-listen`. The pairing cookie is shared by both ports (same host).
+- `-offer name=wss://host[,tokenfile]` (repeatable) offers robots other servers they may switch to; with a token file, the robot also gets that server's robot token. Offers are voluntary: a server decides where its robots may go, and the robot owner can also add servers by hand.
 - `-ui-dir internal/server/ui` serves the dashboard from disk on every request (development). UI edits then need only a page reload.
 - Open the dashboard with the same host as the QR code (e.g. `http://192.168.1.10:8765/`, not `localhost`). The pairing cookie belongs to that host.
 - Run `go test -race ./...` for the tests.
@@ -90,13 +92,14 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 |---|---|---|
 | robot → server | `Register` (must be first) | `{"class": "robot", "capabilities": {"model", "firmware", "commands": [...], "measurements": [...]}}` |
 | robot → server | `RobotTelemetry` | `{"measurements": {"battery_pct": 87.5}}` (values are numbers) |
-| robot → server | `RobotEvent` | `{"name", "data"}`: `shake`, `head_press` with zone intensities `{"z0", "z1", "z2"}` (0–3), `head_release` with `{"ms"}`, `head_swipe_forward`, `head_swipe_backward`, `screen_tap` with `{"x", "y"}`, `screensaver_on` with `{"manual": 0 or 1}`, `screensaver_off`, `standby` with `{"minutes"}`, `standby_end` with `{"touched"}`, `nfc_tag` with `{"uid": "04:A2:…", "type", "atqa", "sak"}` plus `"text"` when the tag holds an NDEF URI or text record, `nfc_removed` with `{"uid"}`, `proximity_near` / `proximity_far` with `{"value"}`, `ir_received` with `{"protocol": "nec" or "raw", "address", "command", "raw"}` (raw marks/spaces in µs, always present), `power_button` with `{"press": "short" or "long"}`, `usb_plugged` / `usb_unplugged`, `battery_inserted` / `battery_removed`. Values are numbers or strings. Browsers also get a per-robot `seq` |
+| robot → server | `RobotEvent` | `{"name", "data"}`: `shake`, `head_press` with zone intensities `{"z0", "z1", "z2"}` (0–3), `head_release` with `{"ms"}`, `head_swipe_forward`, `head_swipe_backward`, `screen_tap` with `{"x", "y"}`, `screensaver_on` with `{"manual": 0 or 1}`, `screensaver_off`, `standby` with `{"minutes"}`, `standby_end` with `{"touched"}`, `nfc_tag` with `{"uid": "04:A2:…", "type", "atqa", "sak"}` plus `"text"` when the tag holds an NDEF URI or text record, `nfc_removed` with `{"uid"}`, `proximity_near` / `proximity_far` with `{"value"}`, `ir_received` with `{"protocol": "nec" or "raw", "address", "command", "raw"}` (raw marks/spaces in µs, always present), `screen_long_press` with `{"x", "y"}` (free for apps), `servers` with `{"list": JSON array of {name, url, origin, token: bool}, "current", "default"}`, `power_button` with `{"press": "short" or "long"}`, `usb_plugged` / `usb_unplugged`, `battery_inserted` / `battery_removed`. Values are numbers or strings. Browsers also get a per-robot `seq` |
 | robot → server | `RobotPong` | `{"id", "queue_ms"}`: answer to `ping`; `queue_ms` is time spent waiting on the robot |
 | robot → server | `Heartbeat` | `{}`, every 30 s |
 | server → robot | `Accepted` / `Rejected` | `{}` / `{"reason": "..."}` |
 | server → robot | `PairCode` | `{"code", "url", "expires_in_s"}`: show `url` as a QR code |
 | server → robot | `Paired` | `{"viewers": 1}` |
 | server → robot | `RobotCommand` | `{"command": "nod", "args": {}}` |
+| server → robot | `ServerOffer` | `{"servers": [{"name", "url", "token"?}]}`: other servers this server lets its robots switch to (from `-offer`), sent after `Accepted` |
 
 ### Commands
 
@@ -126,6 +129,8 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 | `servo_power` | `{"on": bool}`: both head servos powered or limp. Events `servo_power_on` / `servo_power_off`, telemetry `servo_power` |
 | `rotate` | `{"velocity": -1000..1000, "seconds": 1..30, "no_head_cable": true}`: continuous yaw rotation, refused (`rotate_refused` `{"reason"}`) without `no_head_cable`, stopped by `velocity: 0`, by any other head command, standby or the time limit. Events `rotate_on` / `rotate_off`, telemetry `rotate_s` |
 | `touch_stream`, `imu_stream` | `{"on": bool}`: sent by the server while a browser has `?touch=1` / `?imu=1` open |
+| `server_add` | `{"url": "ws://…" or "wss://…", "name", "token"}`: add (or update) an entry in the robot's server list, stored on the robot |
+| `server_remove`, `server_default`, `server_switch` | `{"server": url or name}`: remove an entry (not the built-in or current one), make it the one used at start, or switch to it now (the robot leaves this server) |
 | `proximity` | `{"on": bool}`: the proximity sensor, whose IR LED next to the camera pulses ~10×/s. Off stops the LED and the approach events; light and auto-brightness keep working. Telemetry `proximity_on` |
 | `power_led` | `{"mode": "on\|off\|blink\|fast\|charging"}`: the red power LED; `charging` hands it back to the charger |
 | `nfc` | `{"on": bool}`: NFC tag polling, on by default. Listed only when the robot found its reader |

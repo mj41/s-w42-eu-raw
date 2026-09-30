@@ -29,12 +29,13 @@ var uiFS embed.FS
 
 // Config configures a Server.
 type Config struct {
-	RobotToken string        // shared bearer token robots must present
-	PublicURL  string        // base URL browsers use, e.g. http://192.168.1.10:8765
-	PairTTL    time.Duration // lifetime of a pairing code
-	UIDir      string        // development: serve index.html from this directory instead of the embedded copy
-	StateFile  string        // JSON snapshot of pairings and robots, loaded by New (see state.go); "" disables
-	HTTPSPort  string        // port of the HTTPS listener for browsers, if any; advertised by /api/info
+	RobotToken string               // shared bearer token robots must present
+	PublicURL  string               // base URL browsers use, e.g. http://192.168.1.10:8765
+	PairTTL    time.Duration        // lifetime of a pairing code
+	UIDir      string               // development: serve index.html from this directory instead of the embedded copy
+	StateFile  string               // JSON snapshot of pairings and robots, loaded by New (see state.go); "" disables
+	HTTPSPort  string               // port of the HTTPS listener for browsers, if any; advertised by /api/info
+	Offers     []wire.OfferedServer // other servers robots may switch to, sent as ServerOffer
 	Log        *slog.Logger
 }
 

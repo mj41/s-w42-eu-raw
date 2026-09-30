@@ -35,7 +35,21 @@ const (
 	KindPairCode     = "PairCode"
 	KindPaired       = "Paired"
 	KindRobotCommand = "RobotCommand"
+	KindServerOffer  = "ServerOffer"
 )
+
+// ServerOfferBody lists other servers this server lets its robots switch to
+// (voluntary): the robot adds them to its server list. Token is the robot
+// token for that server, when this server's operator may hand it out.
+type ServerOfferBody struct {
+	Servers []OfferedServer `json:"servers"`
+}
+
+type OfferedServer struct {
+	Name  string `json:"name"`
+	URL   string `json:"url"`
+	Token string `json:"token,omitempty"`
+}
 
 // ClassRobot is the only worker class this server accepts.
 const ClassRobot = "robot"
@@ -112,6 +126,8 @@ type PairedBody struct {
 //	snapshot                                   full-resolution still, arrives as BinSnapshot
 //	camera_config {"mirror": bool, "flip": bool}
 //	camera_reg {"reg": n, "value": v}          raw sensor register write (optional) and read
+//	server_add {"url", "name", "token"}        add/update an entry in the robot's server list
+//	server_remove / server_default / server_switch {"server": url or name}
 //	screensaver {"on": bool}                   blank the screen / wake it
 //	standby    {"minutes": 1..120}             offline with the screen off
 //	speaker                                    (no JSON: audio arrives as BinSpeakerPCM)

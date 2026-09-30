@@ -113,6 +113,11 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 	if f, err := wire.Marshal(wire.KindAccepted, wire.Meta{WorkerID: id, SessionID: newCode()}, nil); err == nil {
 		c.enqueue(f)
 	}
+	if len(s.cfg.Offers) > 0 {
+		if f, err := wire.Marshal(wire.KindServerOffer, wire.Meta{WorkerID: id}, wire.ServerOfferBody{Servers: s.cfg.Offers}); err == nil {
+			c.enqueue(f)
+		}
+	}
 	s.sendPairCode(c)
 	// Turn camera and mic back on if browsers were already watching.
 	s.mu.Lock()

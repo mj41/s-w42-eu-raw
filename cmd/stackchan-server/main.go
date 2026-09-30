@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/mj41/stackchan-server/internal/server"
+	"github.com/mj41/stackchan-server/internal/wire"
 )
 
 func main() {
@@ -40,7 +41,9 @@ func main() {
 		tlsListen = flag.String("tls-listen", "", "also serve browsers over HTTPS on this address, e.g. :8766 (robots stay on -listen)")
 		tlsCert   = flag.String("tls-cert", defaultConfigFile("tls-cert.pem"), "TLS certificate for -tls-listen; a self-signed one is created if missing")
 		tlsKey    = flag.String("tls-key", defaultConfigFile("tls-key.pem"), "TLS key for -tls-listen")
+		offers    offerFlags
 	)
+	flag.Var(&offers, "offer", "offer robots another server: name=wss://host[,tokenfile] (repeatable; the token file holds that server's robot token)")
 	flag.Parse()
 
 	level := slog.LevelInfo
@@ -82,6 +85,7 @@ func main() {
 		UIDir:      *uiDir,
 		StateFile:  *stateFile,
 		HTTPSPort:  httpsPort,
+		Offers:     offers,
 		Log:        log,
 	})
 	httpSrv := &http.Server{Addr: *listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
@@ -194,4 +198,30 @@ func lanIP() string {
 		return c.LocalAddr().(*net.UDPAddr).IP.String()
 	}
 	return "127.0.0.1"
+}
+
+// offerFlags collects -offer name=url[,tokenfile] values.
+type offerFlags []wire.OfferedServer
+
+func (o *offerFlags) String() string { return fmt.Sprint(len(*o), " offers") }
+
+func (o *offerFlags) Set(v string) error {
+	name, rest, ok := strings.Cut(v, "=")
+	if !ok || name == "" {
+		return fmt.Errorf("want name=url[,tokenfile]")
+	}
+	url, tokenFile, _ := strings.Cut(rest, ",")
+	if !strings.HasPrefix(url, "ws://") && !strings.HasPrefix(url, "wss://") {
+		return fmt.Errorf("url must start with ws:// or wss://")
+	}
+	offer := wire.OfferedServer{Name: name, URL: url}
+	if tokenFile != "" {
+		b, err := os.ReadFile(tokenFile)
+		if err != nil {
+			return err
+		}
+		offer.Token = strings.TrimSpace(string(b))
+	}
+	*o = append(*o, offer)
+	return nil
 }
