@@ -10,6 +10,7 @@ package wire
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -247,4 +248,27 @@ func (f Frame) Decode(v any) error {
 		return fmt.Errorf("decode %s body: %w", f.Kind, err)
 	}
 	return nil
+}
+
+// AssetChunkSize is the data per BinAssetChunk message.
+const AssetChunkSize = 32 << 10
+
+// AssetChunks splits a file into BinAssetChunk messages (type byte included):
+// uint8 name length, name, uint32 LE total size, uint32 LE offset, data.
+// An empty file is one message without data.
+func AssetChunks(name string, data []byte) [][]byte {
+	var out [][]byte
+	for off := 0; off == 0 || off < len(data); off += AssetChunkSize {
+		part := data[off:min(off+AssetChunkSize, len(data))]
+		msg := make([]byte, 0, 10+len(name)+len(part))
+		msg = append(msg, BinAssetChunk, byte(len(name)))
+		msg = append(msg, name...)
+		msg = binary.LittleEndian.AppendUint32(msg, uint32(len(data)))
+		msg = binary.LittleEndian.AppendUint32(msg, uint32(off))
+		out = append(out, append(msg, part...))
+		if len(data) == 0 {
+			break
+		}
+	}
+	return out
 }

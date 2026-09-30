@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/binary"
 	"io"
 	"net/http"
 	"regexp"
@@ -17,7 +16,6 @@ import (
 // "asset_saved" {name, bytes, crc} or "asset_error" {name, reason} event.
 
 const (
-	assetChunkSize = 32 << 10
 	maxAssetBytes  = 2 << 20
 	uploadHeader   = "X-Stackchan-Upload" // a custom header forces a CORS preflight: no cross-site uploads
 )
@@ -27,25 +25,6 @@ var assetNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9._-]*(/[A-Za-
 
 func validAssetName(name string) bool {
 	return len(name) <= 64 && assetNamePattern.MatchString(name)
-}
-
-// assetChunks splits a file into upload messages: type byte, uint8 name
-// length, name, uint32 LE total size, uint32 LE offset, then the data.
-func assetChunks(name string, data []byte) [][]byte {
-	var out [][]byte
-	for off := 0; off == 0 || off < len(data); off += assetChunkSize {
-		part := data[off:min(off+assetChunkSize, len(data))]
-		msg := make([]byte, 0, 10+len(name)+len(part))
-		msg = append(msg, wire.BinAssetChunk, byte(len(name)))
-		msg = append(msg, name...)
-		msg = binary.LittleEndian.AppendUint32(msg, uint32(len(data)))
-		msg = binary.LittleEndian.AppendUint32(msg, uint32(off))
-		out = append(out, append(msg, part...))
-		if len(data) == 0 {
-			break
-		}
-	}
-	return out
 }
 
 // handleAssetUpload: POST /api/robots/{id}/assets?name=food/cake.png with the file as the body.
@@ -86,7 +65,7 @@ func (s *Server) handleAssetUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "file too big (max 2 MB)", http.StatusRequestEntityTooLarge)
 		return
 	}
-	chunks := assetChunks(name, data)
+	chunks := wire.AssetChunks(name, data)
 	go s.sendAsset(conn, name, chunks)
 	s.log.Info("asset upload", "robot", id, "name", name, "bytes", len(data), "chunks", len(chunks))
 	s.commandSent(id, "asset_upload", map[string]any{"name": name, "bytes": len(data)})
