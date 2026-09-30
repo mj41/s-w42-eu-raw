@@ -79,9 +79,12 @@ type robotState struct {
 	// From the robot's "standby" event: when it plans to reconnect.
 	standbyUntil time.Time
 	micOn        bool
-	imuOn        bool // imu_stream, like cameraOn
+	imuOn        bool   // imu_stream, like cameraOn
+	touchOn      bool   // touch_stream
+	snapshot     []byte // latest full-resolution still (JPEG), in memory only
+	snapshotAt   time.Time
 	// Media received from the robot since mediaStatsAt: [0] camera, [1] microphone.
-	mediaFrames, mediaBytes [3]int // [0] camera, [1] microphone, [2] IMU
+	mediaFrames, mediaBytes [4]int // [0] camera, [1] microphone, [2] IMU, [3] touch
 	mediaStatsAt            time.Time
 }
 
@@ -153,6 +156,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/robots/{id}/command", s.handleCommand)
 	mux.HandleFunc("POST /api/robots/{id}/picture", s.handlePicture)
 	mux.HandleFunc("GET /api/robots/{id}/media", s.handleMedia)
+	mux.HandleFunc("GET /api/robots/{id}/snapshot", s.handleSnapshot)
 	mux.Handle("GET /emoji/", http.StripPrefix("/emoji/", s.emojiFiles()))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok\n")) })
 	return mux
@@ -178,7 +182,7 @@ func (s *Server) attach(c *robotConn, reg wire.RegisterBody) {
 	st.labels = reg.Labels
 	st.lastSeen = time.Now()
 	// A fresh connection starts with camera and mic off (see handleRobotConnect).
-	st.cameraOn, st.micOn, st.imuOn = false, false, false
+	st.cameraOn, st.micOn, st.imuOn, st.touchOn = false, false, false, false
 	st.standbyUntil = time.Time{} // back online
 	s.mu.Unlock()
 

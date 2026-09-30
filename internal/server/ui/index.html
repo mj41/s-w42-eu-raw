@@ -181,6 +181,9 @@ const SENSOR_LABELS = {
   yaw_pos_raw: ["Yaw position (raw 0–1000)", ""], yaw_speed_raw: ["Yaw speed (raw)", ""], yaw_current_raw: ["Yaw current (raw)", ""],
   yaw_moving: ["Yaw moving", ""], pitch_voltage_v: ["Pitch servo supply", " V"], pitch_pos_raw: ["Pitch position (raw 0–1000)", ""],
   pitch_speed_raw: ["Pitch speed (raw)", ""], pitch_current_raw: ["Pitch current (raw)", ""], pitch_moving: ["Pitch moving", ""],
+  light_ch0: ["Light CH0 (raw, visible+IR)", ""], light_ch1: ["Light CH1 (raw, IR)", ""],
+  rtc_unix: ["RTC clock", ""], system_unix: ["System clock", ""], pmic_ts_raw: ["Battery TS pin (raw)", ""],
+  servo_power: ["Servo power", ""], rotate_s: ["Rotating", " s left"],
   head_zone0: ["Head zone 0", " (0–3)"], head_zone1: ["Head zone 1", " (0–3)"], head_zone2: ["Head zone 2", " (0–3)"],
   light_lux: ["Light", " lux"], proximity: ["Proximity", " (0–2047)"],
   body_battery_v: ["Body battery", " V"], body_current_ma: ["Body current (+ draw, − charge)", " mA"], body_power_mw: ["Body power (+ draw)", " mW"],
@@ -197,6 +200,8 @@ const SENSOR_FORMAT = {
   pmic_status1: (v) => hex(v), pmic_status2: (v) => hex(v),
   usb_data: (v) => (v ? "yes" : "no"),
   yaw_moving: (v) => (v ? "yes" : "no"), pitch_moving: (v) => (v ? "yes" : "no"),
+  servo_power: (v) => (v ? "on" : "off"),
+  rtc_unix: (v) => new Date(v * 1000).toLocaleString(), system_unix: (v) => new Date(v * 1000).toLocaleString(),
 };
 
 function el(tag, props = {}, children = []) {
@@ -337,6 +342,43 @@ function makeCard(r) {
     }, 1000);
     c.imuBox.replaceChildren(el("div", { className: "row", style: "margin-top:8px" }, [live, csv]), out);
   }
+  if (has("touch_stream")) {
+    // Raw touch points (both fingers, 50 Hz) over a media socket (touch=1), drawn at half size.
+    const tl = { ws: null, frames: 0 };
+    const btn = el("button", { className: "soft", textContent: "Live touch" });
+    const canvas = el("canvas", { width: 160, height: 120, hidden: true,
+      style: "display:block;margin-top:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg)" });
+    const txt = el("div", { className: "muted stats" });
+    const draw = (pts) => {
+      const g = canvas.getContext("2d");
+      g.clearRect(0, 0, 160, 120);
+      pts.forEach(([id, x, y]) => {
+        g.fillStyle = id ? "#ff3d9a" : "#7d8cff";
+        g.beginPath(); g.arc(x / 2, y / 2, 7, 0, 2 * Math.PI); g.fill();
+      });
+      txt.textContent = pts.length ? pts.map(([id, x, y]) => `#${id} ${x},${y}`).join("  ") : "no finger";
+    };
+    btn.onclick = () => {
+      if (tl.ws) { tl.ws.onclose = null; tl.ws.close(); tl.ws = null; btn.textContent = "Live touch"; canvas.hidden = true; txt.textContent = ""; return; }
+      const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/robots/${encodeURIComponent(c.id)}/media?touch=1`);
+      ws.binaryType = "arraybuffer";
+      ws.onmessage = (ev) => {
+        const dv = new DataView(ev.data);
+        if (dv.getUint8(0) !== 0x06) return;
+        let o = 3, pts = [];
+        for (let f = dv.getUint16(1, true); f > 0; f--) {
+          const n = dv.getUint8(o + 4); o += 5; pts = [];
+          for (let i = 0; i < n; i++, o += 5) pts.push([dv.getUint8(o), dv.getUint16(o + 1, true), dv.getUint16(o + 3, true)]);
+        }
+        draw(pts); // the newest frame
+      };
+      ws.onclose = () => { if (tl.ws === ws) { tl.ws = null; btn.textContent = "Live touch"; } };
+      tl.ws = ws;
+      btn.textContent = "Stop live touch";
+      canvas.hidden = false;
+    };
+    c.imuBox.append(el("div", { className: "row", style: "margin-top:8px" }, [btn]), canvas, txt);
+  }
 
   if (has("screensaver") || has("standby")) {
     sections.push(el("h2", { textContent: "Screen & power" }));
@@ -367,6 +409,16 @@ function makeCard(r) {
       el("button", { className: "soft", textContent: "Reader off", onclick: () => run("nfc", { on: false }, "NFC reader off") }),
     ]), el("div", { className: "muted", style: "font-size:0.85rem;margin-top:6px",
       textContent: "Hold a tag or card near the robot: it shows up under Events, with the link or text stored on NTAG stickers." }));
+    // Raw memory of the last Type 2 tag (NTAG, Ultralight): 4 bytes per page.
+    const dump = el("pre", { className: "muted", style: "font-size:0.8rem;overflow-x:auto;margin:8px 0 0", hidden: true });
+    c.onNfc = (d) => {
+      if (!d.mem) return;
+      const lines = [];
+      for (let i = 0; i < d.mem.length; i += 8) lines.push(`page ${String(i / 8).padStart(3)}  ${d.mem.slice(i, i + 8).match(/../g).join(" ")}`);
+      dump.textContent = `Last tag ${d.uid}, ${d.mem.length / 2} bytes:\n` + lines.join("\n");
+      dump.hidden = false;
+    };
+    sections.push(dump);
   }
 
   if (has("ping")) {
@@ -761,6 +813,45 @@ function makeCard(r) {
     }, 1000);
     sections.push(el("h2", { textContent: "Camera & mic" }),
       el("div", { className: "row" }, [has("camera") && watch, has("mic") && listen, chanSel].filter(Boolean)), img, info);
+    if (has("snapshot")) {
+      // Full-resolution still: the robot switches the sensor to 640x480 for one frame.
+      const shot = el("img", { alt: "Robot snapshot", hidden: true, style: "width:100%;border-radius:10px;margin-top:8px" });
+      const link = el("a", { textContent: "Download", hidden: true });
+      c.onSnapshot = (e) => {
+        const url = `/api/robots/${encodeURIComponent(c.id)}/snapshot?t=${Date.parse(e.ts) || Date.now()}`;
+        shot.src = url;
+        shot.hidden = false;
+        link.href = url;
+        link.download = `${c.id}-${(e.ts || "").replace(/[:.]/g, "-")}.jpg`;
+        link.hidden = false;
+        say(`Snapshot ${Math.round(e.bytes / 1024)} KB`);
+      };
+      sections.push(el("div", { className: "row", style: "margin-top:8px" }, [
+        el("button", { className: "soft", textContent: "Snapshot 640×480", onclick: () => run("snapshot", {}, "snapshot (takes a second)") }), link,
+      ]), shot);
+    }
+    if (has("camera_config")) {
+      const mirror = el("input", { type: "checkbox" }), flip = el("input", { type: "checkbox" });
+      mirror.onchange = () => run("camera_config", { mirror: mirror.checked }, "camera mirror " + (mirror.checked ? "on" : "off"));
+      flip.onchange = () => run("camera_config", { flip: flip.checked }, "camera flip " + (flip.checked ? "on" : "off"));
+      sections.push(el("div", { className: "row", style: "margin-top:4px" }, [
+        el("label", { className: "check muted", style: "margin-top:0" }, [mirror, "Mirror"]),
+        el("label", { className: "check muted", style: "margin-top:0" }, [flip, "Flip"]),
+      ]));
+    }
+    if (has("camera_reg")) {
+      // Raw GC0308 registers (see its datasheet), e.g. exposure and gain; the answer comes as a camera_reg event.
+      const reg = el("input", { className: "code", value: "0x03", ariaLabel: "Sensor register" });
+      const val = el("input", { className: "code", placeholder: "value", ariaLabel: "Register value" });
+      sections.push(el("div", { className: "row", style: "margin-top:8px" }, [
+        el("span", { className: "muted", textContent: "Sensor register" }), reg, val,
+        el("button", { className: "soft", textContent: "Read", onclick: () => run("camera_reg", { reg: Number(reg.value) }, "read register") }),
+        el("button", { className: "soft", textContent: "Write", onclick: () => {
+          if (val.value.trim() === "") { say("Enter a value to write"); return; }
+          run("camera_reg", { reg: Number(reg.value), value: Number(val.value) }, "write register");
+        } }),
+      ]));
+    }
   }
 
   // Right below the camera, to steer the head while watching.
@@ -787,6 +878,35 @@ function makeCard(r) {
         el("span", { className: "muted", textContent: "Hold position" }), holdSel,
         el("span", { className: "muted", style: "font-size:0.85rem", textContent: "servos stay powered at the current angle, then go slack again" }),
       ]));
+    }
+    if (has("servo_power")) {
+      sections.push(el("div", { className: "row", style: "margin-top:8px" }, [
+        el("span", { className: "muted", textContent: "Servo power" }),
+        el("button", { className: "soft", textContent: "On", onclick: () => run("servo_power", { on: true }, "servo power on") }),
+        el("button", { className: "soft", textContent: "Off", onclick: () => run("servo_power", { on: false }, "servo power off") }),
+      ]));
+    }
+    if (has("rotate")) {
+      // Continuous yaw: time-limited, and only after confirming that no cable is in the head's
+      // USB-C (the robot cannot tell the head port from the stand port).
+      const noCable = el("input", { type: "checkbox" });
+      const speed = el("select", { className: "select", ariaLabel: "Rotation speed" },
+        [["150", "Slow"], ["350", "Medium"], ["700", "Fast"]].map(([v, t]) => el("option", { value: v, textContent: t })));
+      const secs = el("select", { className: "select", ariaLabel: "Rotation time" },
+        [["3", "3 s"], ["10", "10 s"], ["30", "30 s"]].map(([v, t]) => el("option", { value: v, textContent: t })));
+      c.usbWarn = el("div", { className: "muted", style: "font-size:0.85rem", hidden: true,
+        textContent: "USB power is plugged in: rotate only if the cable is in the stand, not in the head." });
+      const spin = (dir) => {
+        if (!noCable.checked) { say("Tick “No cable in the head” first"); return; }
+        run("rotate", { velocity: dir * +speed.value, seconds: +secs.value, no_head_cable: true }, `rotate ${dir > 0 ? "right" : "left"}`);
+      };
+      sections.push(el("div", { className: "row", style: "margin-top:8px" }, [
+        el("span", { className: "muted", textContent: "Rotate" }),
+        el("button", { className: "soft", textContent: "⟲", ariaLabel: "Rotate left", onclick: () => spin(-1) }),
+        el("button", { className: "soft", textContent: "Stop", onclick: () => run("rotate", { velocity: 0 }, "rotate stop") }),
+        el("button", { className: "soft", textContent: "⟳", ariaLabel: "Rotate right", onclick: () => spin(1) }),
+        speed, secs,
+      ]), el("label", { className: "check muted" }, [noCable, "No cable in the head's USB-C"]), c.usbWarn);
     }
   }
 
@@ -925,6 +1045,7 @@ function makeCard(r) {
     if (c.holdSel && r.telemetry.hold_s === 0 && c.holdSel.value !== "0" && document.activeElement !== c.holdSel) {
       c.holdSel.value = "0"; // the hold ran out on the robot
     }
+    if (c.usbWarn) c.usbWarn.hidden = !(r.telemetry.core_vbus_v > 1);
     if (c.proxLabel && "proximity_on" in r.telemetry) {
       c.proxLabel.hidden = false;
       if (Date.now() - (c.proxTouched || 0) > 4000) c.proxBox.checked = r.telemetry.proximity_on > 0;
@@ -975,16 +1096,19 @@ function makeCard(r) {
       return;
     }
     if (ev.name === "ir_received" && c.onIr) c.onIr(ev.data || {});
+    if (ev.name === "nfc_tag" && c.onNfc) c.onNfc(ev.data || {});
     const d = ev.data || {};
     const where = "x" in d ? ` (${d.x}, ${d.y})`
       : "manual" in d ? (d.manual ? " (manual)" : " (auto)")
+      : "reg" in d ? ` ${hex(d.reg)} = ${d.value < 0 ? "failed" : hex(d.value)}`
       : "press" in d ? ` (${d.press})`
+      : "reason" in d ? `: ${d.reason}`
       : "seconds" in d ? ` (${d.seconds} s)`
       : "z0" in d ? ` (zones ${d.z0}·${d.z1}·${d.z2})`
       : "ms" in d ? ` (${d.ms} ms)`
       : "value" in d ? ` (${d.value})`
       : "protocol" in d ? (d.protocol === "nec" ? ` NEC ${hex(d.address)} / ${hex(d.command)}` : ` raw (${(d.raw || "").split(",").length} timings)`)
-      : "uid" in d ? ` ${d.uid}` + (d.type ? ` (${d.type.replaceAll("_", " ")})` : "") + (d.text ? ` “${d.text}”` : "")
+      : "uid" in d ? ` ${d.uid}` + (d.type ? ` (${d.type.replaceAll("_", " ")})` : "") + (d.text ? ` “${d.text}”` : "") + (d.mem ? ` · ${d.mem.length / 2} bytes read` : "")
       : "";
     c.events.unshift({ sent: false, text: new Date(ev.ts).toLocaleTimeString() + "  " + ev.name.replaceAll("_", " ") + where });
     c.events.length = Math.min(c.events.length, 40);
@@ -1100,6 +1224,11 @@ function connect() {
     const e = JSON.parse(ev.data);
     const c = cards.get(e.robot);
     if (c) c.addEvent(e);
+  });
+  es.addEventListener("snapshot", (ev) => {
+    const e = JSON.parse(ev.data);
+    const c = cards.get(e.robot);
+    if (c && c.onSnapshot) c.onSnapshot(e);
   });
   es.addEventListener("command_sent", (ev) => {
     const e = JSON.parse(ev.data);

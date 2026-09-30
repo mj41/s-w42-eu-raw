@@ -19,6 +19,9 @@ For each paired robot:
 - **LEDs:** one colour for all 12 LEDs, "Random" (a random colour per LED, for a quick test) and "Off"; effects drawn by the robot (Rainbow, Breathe, Chase, Blink) in that colour at three speeds; and a picker per LED.
 - **Settings:** brightness and volume.
 - **Screen:** stickers over the face (heart, angry, sweat, shy, dizzy), 12 emoji (smile, grin, laugh, wink, love, cool, surprised, thinking, sleepy, cry, sob, angry) sent as a full-screen picture, or a picture from the phone. The picture is scaled to 320x240 in the browser and replaces the face until "Face".
+- **Live touch** (under Sensors): both fingers on the screen, drawn live (50 Hz) from the raw touch controller data. Events `touch_down` / `touch_up` (with duration) come from the same data.
+- **Camera extras:** "Snapshot 640×480" (shown below the video, with a download link), Mirror / Flip, and raw sensor registers (read / write, answer in Events).
+- **Head extras:** Servo power on/off, and Rotate ⟲ / Stop / ⟳ (continuous yaw, 3–30 s, only after ticking "No cable in the head's USB-C"; with USB power present the dashboard warns again).
 - **Live IMU** (under Sensors): raw accelerometer, gyro and magnetometer at 100 Hz while the button is on (the robot streams only while someone watches), with "Download CSV" of up to 60 s.
 - **Camera & mic:** live video (JPEG, about 5 fps) and the robot's microphone, played through Web Audio. The robot streams only while someone watches or listens, and shows a red LIVE badge meanwhile.
 - **Speaker:** "Talk" (tap to start, tap again to stop) streams your microphone to the robot, "Play sound file" plays any audio file the browser can decode, and "Beep" is a test tone. Audio is resampled to 24 kHz in the browser and the robot's mouth moves while it plays. Browsers give the microphone only to secure pages: use `http://localhost` on the server machine, or run the server with `-tls-listen :8766` and open `https://<LAN IP>:8766` on the phone (the plain page links to it; accept the self-signed certificate warning once). Files and Beep work anywhere.
@@ -117,6 +120,12 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 | `camera`, `mic` | `{"on": bool}`: sent by the server, not by browsers, while someone watches or listens |
 | `ir_send` | `{"address", "command"}` sends an NEC code; `{"raw": "9000,4500,562,…", "carrier_hz": 38000}` sends marks and spaces in µs (e.g. what `ir_received` reported). `"frames": 1..5` sends the whole frame that many times, 108 ms apart (for weak links; a toggle button may toggle twice). `"repeat": 0..20` is like holding the button: NEC repeat codes every 108 ms, or the raw frame again after 40 ms. `"loopback": true` lets the robot hear its own signal (self-test) |
 | `hold` | `{"seconds": 30..300}`: keep the head servos powered at the current angle (they go slack at rest otherwise); `0` releases now. Events `hold_on` `{"seconds"}` / `hold_off`, telemetry `hold_s` (seconds left) |
+| `snapshot` | none: a 640x480 still (the robot switches the sensor for one frame), arriving as binary `0x07` |
+| `camera_config` | `{"mirror": bool, "flip": bool}` |
+| `camera_reg` | `{"reg": n}` reads, `{"reg": n, "value": v}` writes and reads back a raw GC0308 register; answer: event `camera_reg` `{"reg", "value"}` (−1 on failure) |
+| `servo_power` | `{"on": bool}`: both head servos powered or limp. Events `servo_power_on` / `servo_power_off`, telemetry `servo_power` |
+| `rotate` | `{"velocity": -1000..1000, "seconds": 1..30, "no_head_cable": true}`: continuous yaw rotation, refused (`rotate_refused` `{"reason"}`) without `no_head_cable`, stopped by `velocity: 0`, by any other head command, standby or the time limit. Events `rotate_on` / `rotate_off`, telemetry `rotate_s` |
+| `touch_stream`, `imu_stream` | `{"on": bool}`: sent by the server while a browser has `?touch=1` / `?imu=1` open |
 | `proximity` | `{"on": bool}`: the proximity sensor, whose IR LED next to the camera pulses ~10×/s. Off stops the LED and the approach events; light and auto-brightness keep working. Telemetry `proximity_on` |
 | `power_led` | `{"mode": "on\|off\|blink\|fast\|charging"}`: the red power LED; `charging` hands it back to the charger |
 | `nfc` | `{"on": bool}`: NFC tag polling, on by default. Listed only when the robot found its reader |
@@ -131,6 +140,8 @@ The first byte is the type, followed by the payload.
 | `0x02` | robot → server → browser | microphone: sample rate (uint16 LE), then s16le mono PCM |
 | `0x04` | robot → server → browser | microphone, all codec channels: sample rate (uint16 LE), channel count (uint8), then interleaved s16le PCM (on StackChan: channel 1 is the microphone, channel 0 the speaker reference, i.e. what the robot plays, looped back for echo cancellation; the dashboard plays either one) |
 | `0x05` | robot → server → browser | raw IMU while a browser has `?imu=1` open: count (uint16 LE), then per sample time (uint32 LE ms) and 9 float32 LE: accel m/s², gyro °/s, magnetic µT |
+| `0x06` | robot → server → browser | raw touch frames while a browser has `?touch=1` open: frame count (uint16 LE), then per frame time (uint32 LE ms), n (uint8) and n × (id uint8, x uint16 LE, y uint16 LE) |
+| `0x07` | robot → server | full-resolution JPEG still (the `snapshot` command); the server keeps the latest and serves it at `GET /api/robots/{id}/snapshot` (SSE `snapshot` `{"robot", "bytes", "ts"}`) |
 | `0x03` | browser → server → robot | speaker: sample rate (uint16 LE), then s16le mono PCM. Sent on the media socket; forwarded only to robots that list `speaker` |
 | `0x10` | server → robot | picture, JPEG 320x240, shown instead of the face |
 

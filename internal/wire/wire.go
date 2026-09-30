@@ -106,6 +106,12 @@ type PairedBody struct {
 //	camera     {"on": bool}                    sent by the server while browsers watch
 //	mic        {"on": bool}                    sent by the server while browsers listen
 //	imu_stream {"on": bool}                    sent by the server while browsers want BinIMU
+//	touch_stream {"on": bool}                  sent by the server while browsers want BinTouch
+//	servo_power {"on": bool}                   power both head servos (off: limp)
+//	rotate     {"velocity": -1000..1000, "seconds": 1..30, "no_head_cable": true}  continuous yaw
+//	snapshot                                   full-resolution still, arrives as BinSnapshot
+//	camera_config {"mirror": bool, "flip": bool}
+//	camera_reg {"reg": n, "value": v}          raw sensor register write (optional) and read
 //	screensaver {"on": bool}                   blank the screen / wake it
 //	standby    {"minutes": 1..120}             offline with the screen off
 //	speaker                                    (no JSON: audio arrives as BinSpeakerPCM)
@@ -146,7 +152,14 @@ const (
 	// BinIMU: robot -> server -> browser: raw IMU samples (100 Hz) while a browser asks
 	// for them: uint16 LE count, then per sample uint32 LE time (ms) and 9 float32 LE:
 	// accel x/y/z (m/s^2), gyro x/y/z (deg/s), magnetic x/y/z (uT).
-	BinIMU      byte = 0x05
+	BinIMU byte = 0x05
+	// BinTouch: robot -> server -> browser: raw touch frames (every 20 ms) while a browser
+	// asks for them: uint16 LE frame count, then per frame uint32 LE time (ms), uint8 n and
+	// n x (uint8 id, uint16 LE x, uint16 LE y).
+	BinTouch byte = 0x06
+	// BinSnapshot: robot -> server: a full-resolution JPEG still (the "snapshot" command).
+	// The server keeps the latest per robot and serves it at /api/robots/{id}/snapshot.
+	BinSnapshot byte = 0x07
 	BinShowJPEG byte = 0x10 // server -> robot: picture (JPEG, 320x240) shown instead of the face
 )
 

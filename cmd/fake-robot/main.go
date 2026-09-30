@@ -28,7 +28,8 @@ import (
 
 // Same command set as the firmware (see wire.RobotCommandBody).
 var commands = []string{"ping", "nod", "shake", "look", "home", "emotion", "say", "leds", "brightness", "volume",
-	"sticker", "face", "image", "camera", "mic", "screensaver", "standby", "speaker", "nfc", "ir_send", "power_led"}
+	"sticker", "face", "image", "camera", "mic", "screensaver", "standby", "speaker", "nfc", "ir_send", "power_led",
+	"hold", "servo_power", "rotate", "snapshot", "camera_config", "camera_reg", "imu_stream", "touch_stream"}
 
 func main() {
 	var (
@@ -160,6 +161,12 @@ func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) e
 		case err = <-errc:
 			return err
 		case c := <-cmds:
+			if c.cmd.Command == "snapshot" { // the test pattern as the "full resolution" still
+				frame := r.cameraFrame()
+				frame[0] = wire.BinSnapshot
+				err = sendBinary(frame)
+				break
+			}
 			err = r.handle(c, send)
 		case <-telemetry.C:
 			r.battery = max(0, r.battery-0.01)

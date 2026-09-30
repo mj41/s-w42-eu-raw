@@ -2,6 +2,7 @@ package server
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -692,5 +693,32 @@ func TestAgentSummary(t *testing.T) {
 		if got := agentSummary(ua); got != want {
 			t.Errorf("%q: %q, want %q", ua, got, want)
 		}
+	}
+}
+
+func TestSnapshotStoredAndServedToPairedBrowsers(t *testing.T) {
+	ts, _ := newTestServer(t)
+	robot := connectRobot(t, ts, "chan-1", wire.ClassRobot)
+	browser := pairBrowser(t, robot)
+	events := openEvents(t, browser, ts)
+
+	jpeg := []byte{0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 0xFF, 0xD9}
+	if err := robot.ws.WriteMessage(websocket.BinaryMessage, append([]byte{wire.BinSnapshot}, jpeg...)); err != nil {
+		t.Fatal(err)
+	}
+	if ev := waitForEvent(t, events, "snapshot"); ev["bytes"] != float64(len(jpeg)) {
+		t.Fatalf("snapshot event: %v", ev)
+	}
+	resp, err := browser.Get(ts.URL + "/api/robots/chan-1/snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !bytes.Equal(got, jpeg) || resp.Header.Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("snapshot: %d %q %x", resp.StatusCode, resp.Header.Get("Content-Type"), got)
+	}
+	if resp, _ := newBrowser().Get(ts.URL + "/api/robots/chan-1/snapshot"); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("unpaired browser got %d", resp.StatusCode)
 	}
 }

@@ -31,6 +31,7 @@ type mediaSub struct {
 	video   bool
 	audio   bool
 	imu     bool
+	touch   bool
 	out     chan []byte
 	sent    int // written by handleMedia
 	dropped int // under Server.mu
@@ -53,7 +54,11 @@ func (s *Server) relayMedia(robotID string, msg []byte) {
 		return
 	}
 	kind := msg[0]
-	stat := map[byte]int{wire.BinCameraJPEG: 0, wire.BinAudioPCM: 1, wire.BinAudioMulti: 1, wire.BinIMU: 2}
+	if kind == wire.BinSnapshot {
+		s.storeSnapshot(robotID, msg[1:])
+		return
+	}
+	stat := map[byte]int{wire.BinCameraJPEG: 0, wire.BinAudioPCM: 1, wire.BinAudioMulti: 1, wire.BinIMU: 2, wire.BinTouch: 3}
 	i, known := stat[kind]
 	if !known {
 		return // only media types go to browsers
@@ -65,7 +70,7 @@ func (s *Server) relayMedia(robotID string, msg []byte) {
 		st.mediaBytes[i] += len(msg)
 	}
 	for sub := range s.media {
-		wants := [3]bool{sub.video, sub.audio, sub.imu}[i]
+		wants := [4]bool{sub.video, sub.audio, sub.imu, sub.touch}[i]
 		if sub.robot != robotID || !wants {
 			continue
 		}
@@ -84,12 +89,13 @@ func (s *Server) syncMedia(robotID string) {
 	if st == nil || st.conn == nil {
 		return
 	}
-	var wantVideo, wantAudio, wantIMU bool
+	var wantVideo, wantAudio, wantIMU, wantTouch bool
 	for sub := range s.media {
 		if sub.robot == robotID {
 			wantVideo = wantVideo || sub.video
 			wantAudio = wantAudio || sub.audio
 			wantIMU = wantIMU || sub.imu
+			wantTouch = wantTouch || sub.touch
 		}
 	}
 	send := func(command string, on bool) {
@@ -111,6 +117,10 @@ func (s *Server) syncMedia(robotID string) {
 		st.imuOn = wantIMU
 		send("imu_stream", wantIMU)
 	}
+	if wantTouch != st.touchOn && slices.Contains(st.caps.Commands, "touch_stream") {
+		st.touchOn = wantTouch
+		send("touch_stream", wantTouch)
+	}
 }
 
 // handleMedia streams a paired robot's camera (?video=1) and microphone
@@ -119,7 +129,7 @@ func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
 	session := s.session(w, r)
 	id := r.PathValue("id")
 	q := r.URL.Query()
-	sub := &mediaSub{robot: id, session: session, video: q.Get("video") == "1", audio: q.Get("audio") == "1", imu: q.Get("imu") == "1",
+	sub := &mediaSub{robot: id, session: session, video: q.Get("video") == "1", audio: q.Get("audio") == "1", imu: q.Get("imu") == "1", touch: q.Get("touch") == "1",
 		out: make(chan []byte, 8)}
 
 	s.mu.Lock()
@@ -273,15 +283,15 @@ func (s *Server) logMediaStats(robotID string) {
 		return
 	}
 	frames, bytes := st.mediaFrames, st.mediaBytes
-	st.mediaFrames, st.mediaBytes, st.mediaStatsAt = [3]int{}, [3]int{}, time.Now()
-	if !st.cameraOn && !st.micOn && !st.imuOn && frames == [3]int{} {
+	st.mediaFrames, st.mediaBytes, st.mediaStatsAt = [4]int{}, [4]int{}, time.Now()
+	if !st.cameraOn && !st.micOn && !st.imuOn && !st.touchOn && frames == [4]int{} {
 		return
 	}
 	secs := elapsed.Seconds()
 	attrs := []any{"robot", robotID, "camera", st.cameraOn, "mic", st.micOn,
 		"video_fps", round1(float64(frames[0]) / secs), "video_kbps", round1(float64(bytes[0]) / 1024 / secs),
 		"audio_msgs", frames[1], "audio_kbps", round1(float64(bytes[1]) / 1024 / secs),
-		"imu", st.imuOn, "imu_msgs", frames[2]}
+		"imu", st.imuOn, "imu_msgs", frames[2], "touch", st.touchOn, "touch_msgs", frames[3]}
 	if (st.cameraOn && frames[0] == 0) || (st.micOn && frames[1] == 0) || (st.imuOn && frames[2] == 0) {
 		s.log.Warn("media stalled: robot sends nothing for a stream that is on", attrs...)
 		return
@@ -290,3 +300,45 @@ func (s *Server) logMediaStats(robotID string) {
 }
 
 func round1(v float64) float64 { return float64(int(v*10+0.5)) / 10 }
+
+// storeSnapshot keeps a robot's latest full-resolution still and tells its paired browsers.
+func (s *Server) storeSnapshot(robotID string, jpeg []byte) {
+	if !bytes.HasPrefix(jpeg, []byte{0xFF, 0xD8}) {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := s.robots[robotID]
+	if st == nil {
+		return
+	}
+	st.snapshot = bytes.Clone(jpeg)
+	st.snapshotAt = time.Now()
+	s.publish(robotID, "", sseEvent{name: "snapshot", data: mustJSON(map[string]any{
+		"robot": robotID, "bytes": len(jpeg), "ts": st.snapshotAt,
+	})})
+	s.log.Info("snapshot", "robot", robotID, "bytes", len(jpeg))
+}
+
+// handleSnapshot serves a paired robot's latest full-resolution still.
+func (s *Server) handleSnapshot(w http.ResponseWriter, r *http.Request) {
+	session := s.session(w, r)
+	id := r.PathValue("id")
+	s.mu.Lock()
+	paired := s.sessions[session][id]
+	var jpeg []byte
+	if st := s.robots[id]; st != nil {
+		jpeg = st.snapshot
+	}
+	s.mu.Unlock()
+	switch {
+	case !paired:
+		http.Error(w, "robot not paired with this browser", http.StatusForbidden)
+	case jpeg == nil:
+		http.Error(w, "no snapshot yet", http.StatusNotFound)
+	default:
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Write(jpeg)
+	}
+}
