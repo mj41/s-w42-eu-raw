@@ -125,6 +125,7 @@ type PairedBody struct {
 //	mic        {"on": bool}                    sent by the server while browsers listen
 //	imu_stream {"on": bool}                    sent by the server while browsers want BinIMU
 //	touch_stream {"on": bool}                  sent by the server while browsers want BinTouch
+//	light_stream {"on": bool}                  sent while browsers (or an app) want BinLight
 //	servo_power {"on": bool}                   power both head servos (off: limp)
 //	rotate     {"velocity": -1000..1000, "seconds": 1..30, "no_head_cable": true}  continuous yaw
 //	snapshot                                   full-resolution still, arrives as BinSnapshot
@@ -177,6 +178,11 @@ const (
 	// asks for them: uint16 LE frame count, then per frame uint32 LE time (ms), uint8 n and
 	// n x (uint8 id, uint16 LE x, uint16 LE y).
 	BinTouch byte = 0x06
+	// BinLight: robot -> server -> browser: raw light and proximity samples (every 50 ms)
+	// while a browser asks for them (light_stream): uint16 LE count, then per sample
+	// uint32 LE time (ms), uint16 LE proximity (0..2047, 0 while proximity is off),
+	// uint16 LE light CH0 (visible + IR) and CH1 (IR), raw counts.
+	BinLight byte = 0x08
 	// BinSnapshot: robot -> server: a full-resolution JPEG still (the "snapshot" command).
 	// The server keeps the latest per robot and serves it at /api/robots/{id}/snapshot.
 	BinSnapshot byte = 0x07

@@ -379,6 +379,57 @@ function makeCard(r) {
     };
     c.imuBox.append(el("div", { className: "row", style: "margin-top:8px" }, [btn]), canvas, txt);
   }
+  if (has("light_stream")) {
+    // Raw proximity and light (20 samples/s) over a media socket (light=1): the last 10 s
+    // as lines (proximity blue, light CH0 orange, CH1 red), each scaled to its own range.
+    const ls = { ws: null, samples: [], count: 0 };
+    const btn = el("button", { className: "soft", textContent: "Live light & proximity" });
+    const canvas = el("canvas", { width: 320, height: 90, hidden: true,
+      style: "display:block;margin-top:8px;max-width:100%;border:1px solid var(--border);border-radius:8px;background:var(--bg)" });
+    const txt = el("div", { className: "muted stats" });
+    const draw = () => {
+      const g = canvas.getContext("2d"), pts = ls.samples;
+      g.clearRect(0, 0, 320, 90);
+      [[1, "#3f7be0"], [2, "#f5a300"], [3, "#e53935"]].forEach(([k, color]) => {
+        const vals = pts.map((p) => p[k]), lo = Math.min(...vals), hi = Math.max(...vals, lo + 1);
+        g.strokeStyle = color; g.lineWidth = 1.5; g.beginPath();
+        vals.forEach((v, i) => { const x = (i / 199) * 320, y = 84 - ((v - lo) / (hi - lo)) * 78; i ? g.lineTo(x, y) : g.moveTo(x, y); });
+        g.stroke();
+      });
+    };
+    const stop = () => {
+      if (ls.ws) { ls.ws.onclose = null; ls.ws.close(); ls.ws = null; }
+      btn.textContent = "Live light & proximity"; canvas.hidden = true; txt.textContent = "";
+    };
+    btn.onclick = () => {
+      if (ls.ws) { stop(); return; }
+      ls.samples = [];
+      const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/robots/${encodeURIComponent(c.id)}/media?light=1`);
+      ws.binaryType = "arraybuffer";
+      ws.onmessage = (ev) => {
+        const dv = new DataView(ev.data);
+        if (dv.getUint8(0) !== 0x08) return;
+        const n = dv.getUint16(1, true);
+        for (let i = 0, o = 3; i < n; i++, o += 10) {
+          ls.samples.push([dv.getUint32(o, true), dv.getUint16(o + 4, true), dv.getUint16(o + 6, true), dv.getUint16(o + 8, true)]);
+        }
+        ls.count += n;
+        if (ls.samples.length > 200) ls.samples.splice(0, ls.samples.length - 200);
+        draw();
+      };
+      ws.onclose = () => { if (ls.ws === ws) stop(); };
+      ls.ws = ws;
+      btn.textContent = "Stop live light";
+      canvas.hidden = false;
+    };
+    setInterval(() => {
+      if (!ls.ws) return;
+      const s = ls.samples[ls.samples.length - 1];
+      txt.textContent = `${ls.count} samples/s` + (s ? ` · proximity ${s[1]} · light CH0 ${s[2]} · CH1 ${s[3]}` : "");
+      ls.count = 0;
+    }, 1000);
+    c.imuBox.append(el("div", { className: "row", style: "margin-top:8px" }, [btn]), canvas, txt);
+  }
 
   if (has("screensaver") || has("standby")) {
     sections.push(el("h2", { textContent: "Screen & power" }));

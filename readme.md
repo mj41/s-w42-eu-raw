@@ -128,7 +128,7 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 | `camera_reg` | `{"reg": n}` reads, `{"reg": n, "value": v}` writes and reads back a raw GC0308 register; answer: event `camera_reg` `{"reg", "value"}` (−1 on failure) |
 | `servo_power` | `{"on": bool}`: both head servos powered or limp. Events `servo_power_on` / `servo_power_off`, telemetry `servo_power` |
 | `rotate` | `{"velocity": -1000..1000, "seconds": 1..30, "no_head_cable": true}`: continuous yaw rotation, refused (`rotate_refused` `{"reason"}`) without `no_head_cable`, stopped by `velocity: 0`, by any other head command, standby or the time limit. Events `rotate_on` / `rotate_off`, telemetry `rotate_s` |
-| `touch_stream`, `imu_stream` | `{"on": bool}`: sent by the server while a browser has `?touch=1` / `?imu=1` open |
+| `touch_stream`, `imu_stream`, `light_stream` | `{"on": bool}`: sent by the server while a browser has `?touch=1` / `?imu=1` / `?light=1` open (an app server such as stackchan-pet may send `light_stream` itself) |
 | `server_add` | `{"url": "ws://…" or "wss://…", "name", "token"}`: add (or update) an entry in the robot's server list, stored on the robot |
 | `server_remove`, `server_default`, `server_switch` | `{"server": url or name}`: remove an entry (not the built-in or current one), make it the one used at start (`""` = no default: the robot starts as a chooser), or switch to it now (the robot leaves this server) |
 | `proximity` | `{"on": bool}`: the proximity sensor, whose IR LED next to the camera pulses ~10×/s. Off stops the LED and the approach events; light and auto-brightness keep working. Telemetry `proximity_on` |
@@ -146,6 +146,7 @@ The first byte is the type, followed by the payload.
 | `0x04` | robot → server → browser | microphone, all codec channels: sample rate (uint16 LE), channel count (uint8), then interleaved s16le PCM (on StackChan: channel 1 is the microphone, channel 0 the speaker reference, i.e. what the robot plays, looped back for echo cancellation; the dashboard plays either one) |
 | `0x05` | robot → server → browser | raw IMU while a browser has `?imu=1` open: count (uint16 LE), then per sample time (uint32 LE ms) and 9 float32 LE: accel m/s², gyro °/s, magnetic µT |
 | `0x06` | robot → server → browser | raw touch frames while a browser has `?touch=1` open: frame count (uint16 LE), then per frame time (uint32 LE ms), n (uint8) and n × (id uint8, x uint16 LE, y uint16 LE) |
+| `0x08` | robot → server → browser | raw light and proximity every 50 ms while a browser has `?light=1` open: sample count (uint16 LE), then per sample time (uint32 LE ms), proximity (uint16 LE, 0..2047, 0 while off), light CH0 visible+IR and CH1 IR (uint16 LE raw counts); the sensor runs fast (proximity 50 ms, light 100 ms) only while streaming |
 | `0x07` | robot → server | full-resolution JPEG still (the `snapshot` command); the server keeps the latest and serves it at `GET /api/robots/{id}/snapshot` (SSE `snapshot` `{"robot", "bytes", "ts"}`) |
 | `0x03` | browser → server → robot | speaker: sample rate (uint16 LE), then s16le mono PCM. Sent on the media socket; forwarded only to robots that list `speaker` |
 | `0x10` | server → robot | picture, JPEG 320x240, shown instead of the face |

@@ -82,10 +82,11 @@ type robotState struct {
 	micOn        bool
 	imuOn        bool   // imu_stream, like cameraOn
 	touchOn      bool   // touch_stream
+	lightOn      bool   // light_stream
 	snapshot     []byte // latest full-resolution still (JPEG), in memory only
 	snapshotAt   time.Time
 	// Media received from the robot since mediaStatsAt: [0] camera, [1] microphone.
-	mediaFrames, mediaBytes [4]int // [0] camera, [1] microphone, [2] IMU, [3] touch
+	mediaFrames, mediaBytes [5]int // [0] camera, [1] microphone, [2] IMU, [3] touch, [4] light
 	mediaStatsAt            time.Time
 }
 
@@ -183,7 +184,7 @@ func (s *Server) attach(c *robotConn, reg wire.RegisterBody) {
 	st.labels = reg.Labels
 	st.lastSeen = time.Now()
 	// A fresh connection starts with camera and mic off (see handleRobotConnect).
-	st.cameraOn, st.micOn, st.imuOn, st.touchOn = false, false, false, false
+	st.cameraOn, st.micOn, st.imuOn, st.touchOn, st.lightOn = false, false, false, false, false
 	st.standbyUntil = time.Time{} // back online
 	s.mu.Unlock()
 
