@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/mj41/stackchan-server/internal/wire"
+	"github.com/mj41/stackchan-server/wire"
 )
 
 // Liveness timing, same as yolovm-pilot (from Rancher remotedialer).

@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/mj41/stackchan-server/internal/wire"
+	"github.com/mj41/stackchan-server/wire"
 )
 
 // Same command set as the firmware (see wire.RobotCommandBody).

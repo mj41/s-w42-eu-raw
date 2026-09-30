@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/mj41/stackchan-server/internal/server"
-	"github.com/mj41/stackchan-server/internal/wire"
+	"github.com/mj41/stackchan-server/wire"
 )
 
 func main() {

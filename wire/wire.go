@@ -1,4 +1,5 @@
-// Package wire defines the robot <-> server WebSocket frames.
+// Package wire defines the robot <-> server WebSocket frames. It is public so other
+// servers the robot can switch to (e.g. stackchan-pet) speak the same protocol.
 //
 // Every frame is a JSON object {"kind", "meta", "body"}, the same envelope as
 // yolovm-pilot (~/work-stai/stai-yolovm/docs/yolovm-pilot/wire-protocol.md),

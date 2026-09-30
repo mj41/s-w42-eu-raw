@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mj41/stackchan-server/internal/wire"
+	"github.com/mj41/stackchan-server/wire"
 )
 
 //go:embed ui/index.html ui/emoji

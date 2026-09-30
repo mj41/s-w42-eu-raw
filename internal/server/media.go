@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/mj41/stackchan-server/internal/wire"
+	"github.com/mj41/stackchan-server/wire"
 )
 
 // Media: the robot streams camera frames and microphone audio as binary

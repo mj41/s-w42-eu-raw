@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mj41/stackchan-server/internal/wire"
+	"github.com/mj41/stackchan-server/wire"
 )
 
 // State file: pairings and known robots are saved as one JSON snapshot so a

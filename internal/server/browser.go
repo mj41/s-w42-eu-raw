@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mj41/stackchan-server/internal/wire"
+	"github.com/mj41/stackchan-server/wire"
 )
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
