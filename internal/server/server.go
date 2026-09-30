@@ -283,7 +283,9 @@ func (s *Server) publish(robotID, session string, ev sseEvent) {
 // Recent robot events are kept per robot and replayed to browsers that
 // connect later (after pairing, after a phone woke up), so an app can still
 // see e.g. that the screensaver went on. "seq" lets the browser skip repeats.
-const keepRobotEvents = 20
+// keepRobotEvents is the per-robot history (robot events and sent commands)
+// replayed to browsers that connect later.
+const keepRobotEvents = 40
 
 func (s *Server) robotEvent(id string, ev wire.RobotEventBody) {
 	s.mu.Lock()
@@ -476,4 +478,25 @@ func (s *Server) pairedViews(session string) []robotView {
 	}
 	slices.SortFunc(views, func(a, b robotView) int { return strings.Compare(a.ID, b.ID) })
 	return views
+}
+
+// commandSent records a command a browser sent (or a picture) in the robot's
+// history and tells every browser paired with it, so all of them see what was
+// sent, not only what the robot reported.
+func (s *Server) commandSent(id, command string, args map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st := s.robots[id]
+	if st == nil {
+		return
+	}
+	st.eventSeq++
+	msg := sseEvent{name: "command_sent", data: mustJSON(map[string]any{
+		"robot": id, "seq": st.eventSeq, "command": command, "args": args, "ts": time.Now(),
+	})}
+	st.events = append(st.events, msg)
+	if len(st.events) > keepRobotEvents {
+		st.events = st.events[len(st.events)-keepRobotEvents:]
+	}
+	s.publish(id, "", msg)
 }

@@ -170,7 +170,7 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var cmd wire.RobotCommandBody
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&cmd); err != nil || cmd.Command == "" {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&cmd); err != nil || cmd.Command == "" { // long raw IR codes
 		http.Error(w, "body must be {\"command\": \"...\"}", http.StatusBadRequest)
 		return
 	}
@@ -216,6 +216,7 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 		s.log.Debug("command sent", "robot", id, "command", cmd.Command)
 	} else {
 		s.log.Info("command sent", "robot", id, "command", cmd.Command)
+		s.commandSent(id, cmd.Command, cmd.Args)
 	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "sent"})
 }

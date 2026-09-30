@@ -62,6 +62,10 @@
   .stats { font-variant-numeric: tabular-nums; }
   .events { list-style: none; margin: 0; padding: 0; font-variant-numeric: tabular-nums; }
   .events li { padding: 3px 0; border-top: 1px solid var(--border); }
+  .events li.sent { color: var(--muted); }
+  .eventshead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .eventshead h2 { margin-bottom: 8px; }
+  .eventshead select { padding: 4px 8px; font-size: 0.85rem; }
   .status { color: var(--muted); font-size: 0.9rem; min-height: 1.4em; margin-top: 12px; }
   .empty { color: var(--muted); }
   .joinreq { background: var(--card); border: 2px solid var(--accent); border-radius: 14px; padding: 12px 14px; margin-bottom: 12px; }
@@ -100,6 +104,26 @@ const empty = document.getElementById("empty");
 const connLine = document.getElementById("conn");
 const cards = new Map();     // robot id -> card
 const pendingPings = new Map(); // ping id -> {t0, resolve}
+// A sent command as a short line for the Events list.
+function describeCommand(cmd, a) {
+  a = a || {};
+  let text;
+  switch (cmd) {
+    case "ir_send":
+      text = "IR " + (a.raw ? `raw (${String(a.raw).split(",").length} timings)` : `NEC ${hex(a.address || 0)} / ${hex(a.command || 0)}`) +
+        (a.repeat ? ` · hold ×${a.repeat}` : "") + (a.loopback ? " · self-test" : "");
+      break;
+    case "look": text = `look yaw ${a.yaw}° pitch ${a.pitch}°`; break;
+    case "leds": text = "LEDs " + (a.effect || (a.pixels ? "single LEDs" : [a.left, a.right].filter(Boolean).join(" "))); break;
+    case "say": text = `say “${a.text || ""}”`; break;
+    case "picture": text = `picture (${Math.round((a.bytes || 0) / 1024)} KB)`; break;
+    default:
+      text = cmd.replaceAll("_", " ") + " " +
+        Object.entries(a).map(([k, v]) => `${k} ${typeof v === "object" ? JSON.stringify(v) : v}`).join(", ");
+  }
+  text = text.trim();
+  return text.length > 80 ? text.slice(0, 79) + "…" : text;
+}
 const hex = (n) => "0x" + Number(n).toString(16).toUpperCase().padStart(2, "0");
 const serverInfo = fetch("/api/info").then((r) => r.json()).catch(() => ({})); // {https_url?}
 
@@ -234,7 +258,10 @@ function makeCard(r) {
   const sections = [
     el("div", { className: "head" }, [c.dot, el("span", { className: "name", textContent: r.id }), c.meta]),
     el("h2", { textContent: "Status" }), c.table,
-    el("h2", { textContent: "Events" }), (c.eventList = el("ul", { className: "events" })),
+    el("div", { className: "eventshead" }, [el("h2", { textContent: "Events" }), (c.eventFilter = el("select",
+      { className: "select", ariaLabel: "Which events to show" },
+      [["all", "All"], ["robot", "Robot only"], ["sent", "Sent only"]].map(([v, t]) => el("option", { value: v, textContent: t }))))]),
+    (c.eventList = el("ul", { className: "events" })),
     (c.sensorHead = el("h2", { textContent: "Sensors", hidden: true })), (c.sensorTable = el("table", { hidden: true })),
   ];
 
@@ -833,6 +860,12 @@ function makeCard(r) {
       c.blank = ev.name === "screensaver_on";
       c.blankEventAt = Date.now();
     }
+    if (ev.command) { // sent by a browser (command_sent)
+      c.events.unshift({ sent: true, text: new Date(ev.ts).toLocaleTimeString() + "  → " + describeCommand(ev.command, ev.args) });
+      c.events.length = Math.min(c.events.length, 40);
+      c.renderEvents();
+      return;
+    }
     if (ev.name === "ir_received" && c.onIr) c.onIr(ev.data || {});
     const d = ev.data || {};
     const where = "x" in d ? ` (${d.x}, ${d.y})`
@@ -843,9 +876,21 @@ function makeCard(r) {
       : "protocol" in d ? (d.protocol === "nec" ? ` NEC ${hex(d.address)} / ${hex(d.command)}` : ` raw (${(d.raw || "").split(",").length} timings)`)
       : "uid" in d ? ` ${d.uid}` + (d.type ? ` (${d.type.replaceAll("_", " ")})` : "") + (d.text ? ` “${d.text}”` : "")
       : "";
-    c.events.unshift(new Date(ev.ts).toLocaleTimeString() + "  " + ev.name.replaceAll("_", " ") + where);
-    c.events.length = Math.min(c.events.length, 8);
-    c.eventList.replaceChildren(...c.events.map((t) => el("li", { textContent: t })));
+    c.events.unshift({ sent: false, text: new Date(ev.ts).toLocaleTimeString() + "  " + ev.name.replaceAll("_", " ") + where });
+    c.events.length = Math.min(c.events.length, 40);
+    c.renderEvents();
+  };
+  // All / Robot only / Sent only; the choice is kept in this browser.
+  try { c.eventFilter.value = localStorage.getItem("stackchan-events-filter") || "all"; } catch { /* private mode */ }
+  c.eventFilter.onchange = () => {
+    try { localStorage.setItem("stackchan-events-filter", c.eventFilter.value); } catch { /* private mode */ }
+    c.renderEvents();
+  };
+  c.renderEvents = () => {
+    const f = c.eventFilter.value;
+    const shown = c.events.filter((e) => f === "all" || (f === "sent") === e.sent).slice(0, 10);
+    c.eventList.replaceChildren(...(shown.length ? shown.map((e) => el("li", { className: e.sent ? "sent" : "", textContent: e.text }))
+      : [el("li", { className: "sent", textContent: "Nothing yet." })]));
   };
   return c;
 }
@@ -942,6 +987,11 @@ function connect() {
     }
   });
   es.addEventListener("robot_event", (ev) => {
+    const e = JSON.parse(ev.data);
+    const c = cards.get(e.robot);
+    if (c) c.addEvent(e);
+  });
+  es.addEventListener("command_sent", (ev) => {
     const e = JSON.parse(ev.data);
     const c = cards.get(e.robot);
     if (c) c.addEvent(e);

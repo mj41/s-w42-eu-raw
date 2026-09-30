@@ -28,7 +28,7 @@ For each paired robot:
 - **Sensors:** a table fed by the robot's telemetry: acceleration per axis (g) and rotation rate, servo load and temperature, servo supply voltage, chip temperature, room light (lux) and proximity.
 - **Auto brightness** (under Settings, for robots with a light sensor): the robot sets its backlight from the room light. Moving the brightness slider switches it off.
 - **Proximity sensor** (under Settings): on/off. Its IR LED next to the camera blinks about 10 times a second; switch it off, e.g., while using infrared.
-- **Events:** shake, head touch (press with the touched zones, release with its duration, swipe forward / back), screen taps with coordinates, NFC tags (UID, type, and the link or text stored on the tag), and screensaver on/off. The list sits right under Status. The server replays each robot's last 20 events when a browser connects, so a phone that was asleep still sees them.
+- **Events:** shake, head touch (press with the touched zones, release with its duration, swipe forward / back), screen taps with coordinates, NFC tags (UID, type, and the link or text stored on the tag), and screensaver on/off. The list also shows what browsers sent (→ nod, → IR NEC 0x80 / 0x04 · hold ×4, → picture…), from every browser paired with the robot; a switch picks All, Robot only or Sent only. The list sits right under Status. The server replays each robot's last 40 events and sent commands when a browser connects, so a phone that was asleep still sees them.
 - **Screen & power** (right after Events): "Screensaver on" / "Screensaver off", and "Standby" for 1–60 min.
   - **Status** shows the screensaver as `off`, `auto` or `manual`.
   - **Auto:** the robot blanks after 60 s (firmware option) without touch **and** without commands or live media, so using it remotely keeps it awake.
@@ -140,7 +140,7 @@ All endpoints need the session cookie of a browser that paired with the robot.
 | `POST /api/join` | an unpaired browser asks paired browsers for access; returns `{"id", "code", "from", "agent", "expires"}`. Paired browsers get a `join_request` SSE event (also replayed when they connect) |
 | `POST /api/join/{id}/approve`, `…/deny` | a paired browser answers; approve pairs the requester with the approver's robots. The requester gets `join_result` `{"status"}`, the other paired browsers `join_closed` |
 | `GET /api/robots` | paired robots (JSON) |
-| `GET /api/events` | SSE: `robot` (full state; telemetry `screensaver` 0 off / 1 auto / 2 manual), `robot_event` (to every paired browser; the last 20 are replayed on connect), `pong` (only to the browser that pinged) |
+| `GET /api/events` | SSE: `robot` (full state; telemetry `screensaver` 0 off / 1 auto / 2 manual), `robot_event` and `command_sent` (`{"robot", "seq", "command", "args", "ts"}`: what a browser sent; both go to every paired browser, and the last 40 are replayed on connect), `pong` (only to the browser that pinged), `join_request` / `join_closed` / `join_result` (see `/api/join`) |
 | `POST /api/robots/{id}/command` | `{"command", "args"}` as JSON |
 | `POST /api/robots/{id}/picture` | `image/jpeg` body, up to 192 KB |
 | `GET /api/robots/{id}/media?video=1&audio=1` | WebSocket, same origin only, carrying binary `0x01`/`0x02` |

@@ -226,6 +226,7 @@ func (s *Server) handlePicture(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.log.Info("picture sent", "robot", id, "bytes", len(body))
+	s.commandSent(id, "picture", map[string]any{"bytes": len(body)})
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "sent"})
 }
 

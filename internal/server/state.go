@@ -86,7 +86,14 @@ func (s *Server) loadState() error {
 			// The file is indented; an SSE data line must be one line.
 			var compact bytes.Buffer
 			if json.Compact(&compact, ev) == nil {
-				rs.events = append(rs.events, sseEvent{name: "robot_event", data: compact.Bytes()})
+				name := "robot_event"
+				var probe struct {
+					Command string `json:"command"`
+				}
+				if json.Unmarshal(ev, &probe) == nil && probe.Command != "" {
+					name = "command_sent" // see commandSent
+				}
+				rs.events = append(rs.events, sseEvent{name: name, data: compact.Bytes()})
 			}
 		}
 		s.robots[r.ID] = rs
