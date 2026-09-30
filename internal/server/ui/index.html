@@ -657,9 +657,10 @@ function makeCard(r) {
 
     // Audio message: uint16 LE sample rate, then s16le mono PCM.
     // Audio: 0x02 = rate + mono PCM; 0x04 = rate + channel count + interleaved PCM of
-    // all codec channels. "Channel" picks one, or plays channels 0 and 1 as stereo.
+    // all codec channels: 1 is the microphone, 0 the speaker reference (what the robot
+    // plays, looped back for echo cancellation). Pick one, or play both as stereo.
     const chanSel = el("select", { className: "select", ariaLabel: "Microphone channel", hidden: true },
-      [["1", "Channel 1"], ["0", "Channel 0"], ["stereo", "Stereo 0+1"]].map(([v, t]) => el("option", { value: v, textContent: t })));
+      [["1", "Microphone"], ["0", "Speaker reference"], ["stereo", "Both (stereo)"]].map(([v, t]) => el("option", { value: v, textContent: t })));
     const playPcm = (u8, channels = 1, header = 2) => {
       const rate = u8[0] | (u8[1] << 8);
       const pcm = new Int16Array(u8.slice(header).buffer);  // copy: Int16Array needs 2-byte alignment
