@@ -1095,6 +1095,10 @@ function makeCard(r) {
       c.renderEvents();
       return;
     }
+    if (/_(refused|failed)$/.test(ev.name) && Date.now() - Date.parse(ev.ts) < 10000) {
+      // e.g. rotate_refused: say it where the button was pressed, not only in Events
+      status.textContent = ev.name.replaceAll("_", " ") + ((ev.data || {}).reason ? ": " + ev.data.reason : "");
+    }
     if (ev.name === "ir_received" && c.onIr) c.onIr(ev.data || {});
     if (ev.name === "nfc_tag" && c.onNfc) c.onNfc(ev.data || {});
     const d = ev.data || {};
