@@ -506,3 +506,16 @@ func (s *Server) commandSent(id, command string, args map[string]any) {
 	}
 	s.publish(id, "", msg)
 }
+
+// viewerCount is the number of browser sessions paired with a robot.
+func (s *Server) viewerCount(robotID string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, paired := range s.sessions {
+		if paired[robotID] {
+			n++
+		}
+	}
+	return n
+}

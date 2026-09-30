@@ -97,7 +97,7 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 | robot → server | `Heartbeat` | `{}`, every 30 s |
 | server → robot | `Accepted` / `Rejected` | `{}` / `{"reason": "..."}` |
 | server → robot | `PairCode` | `{"code", "url", "expires_in_s"}`: show `url` as a QR code |
-| server → robot | `Paired` | `{"viewers": 1}` |
+| server → robot | `Paired` | `{"viewers": 1}`: after a pairing, and right after `Accepted` when browsers are already paired (pairings survive restarts), so the robot starts with its face instead of the QR screen |
 | server → robot | `RobotCommand` | `{"command": "nod", "args": {}}` |
 | server → robot | `ServerOffer` | `{"servers": [{"name", "url", "token"?}]}`: other servers this server lets its robots switch to (from `-offer`), sent after `Accepted` |
 

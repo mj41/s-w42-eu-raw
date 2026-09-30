@@ -119,6 +119,13 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.sendPairCode(c)
+	// Browsers paired before (pairings survive restarts): tell the robot right away, so
+	// it starts with its face instead of the QR screen.
+	if n := s.viewerCount(id); n > 0 {
+		if f, err := wire.Marshal(wire.KindPaired, wire.Meta{WorkerID: id}, wire.PairedBody{Viewers: n}); err == nil {
+			c.enqueue(f)
+		}
+	}
 	// Turn camera and mic back on if browsers were already watching.
 	s.mu.Lock()
 	s.syncMedia(id)

@@ -737,3 +737,17 @@ func TestServerOfferSentToRobots(t *testing.T) {
 		t.Fatalf("offer: %+v", offer)
 	}
 }
+
+func TestReconnectingRobotHearsItIsPaired(t *testing.T) {
+	ts, _ := newTestServer(t)
+	robot := connectRobot(t, ts, "chan-1", wire.ClassRobot)
+	pairBrowser(t, robot)
+	robot.ws.Close()
+
+	again := connectRobot(t, ts, "chan-1", wire.ClassRobot)
+	var paired wire.PairedBody
+	again.expect(wire.KindPaired, &paired)
+	if paired.Viewers != 1 {
+		t.Fatalf("viewers after reconnect: %d, want 1", paired.Viewers)
+	}
+}
