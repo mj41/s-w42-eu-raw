@@ -111,7 +111,7 @@ function describeCommand(cmd, a) {
   switch (cmd) {
     case "ir_send":
       text = "IR " + (a.raw ? `raw (${String(a.raw).split(",").length} timings)` : `NEC ${hex(a.address || 0)} / ${hex(a.command || 0)}`) +
-        (a.repeat ? ` · hold ×${a.repeat}` : "") + (a.loopback ? " · self-test" : "");
+        (a.frames > 1 ? ` · ${a.frames}×` : "") + (a.repeat ? ` · hold ×${a.repeat}` : "") + (a.loopback ? " · self-test" : "");
       break;
     case "look": text = `look yaw ${a.yaw}° pitch ${a.pitch}°`; break;
     case "leds": text = "LEDs " + (a.effect || (a.pixels ? "single LEDs" : [a.left, a.right].filter(Boolean).join(" "))); break;
@@ -429,8 +429,11 @@ function makeCard(r) {
     const hold = el("select", { className: "select", ariaLabel: "How long to hold the button" },
       [["0", "Tap"], ["4", "Hold 0.5 s"], ["9", "Hold 1 s"], ["18", "Hold 2 s"]].map(([v, t]) =>
         el("option", { value: v, textContent: t, selected: v === "4" })));
+    // Send 3x: the whole frame three times, for a weak link. A toggle button may then toggle twice.
+    const thrice = el("input", { type: "checkbox" });
     const irSend = (code, label) => run("ir_send",
-      { ...(code.raw ? { raw: code.raw } : { address: code.address, command: code.command }), repeat: +hold.value }, label);
+      { ...(code.raw ? { raw: code.raw } : { address: code.address, command: code.command }), repeat: +hold.value,
+        frames: thrice.checked ? 3 : 1 }, label);
     const last = el("div", { className: "muted", textContent: "Point a remote at the robot and press a button." });
     const lastRow = el("div", { className: "row", hidden: true, style: "margin-top:6px" });
     const saved = el("div", { className: "row", style: "margin-top:8px" });
@@ -473,6 +476,8 @@ function makeCard(r) {
       el("div", { className: "row", style: "margin-top:8px" }, [
         el("span", { className: "muted", textContent: "NEC address / command" }), addr, cmd,
         el("button", { className: "soft", textContent: "Send", onclick: () => irSend(necCode(), "IR NEC") }), hold,
+        el("label", { className: "check muted", style: "margin-top:0", title: "Sends the whole code 3 times, 108 ms apart. A button that toggles may toggle twice." },
+          [thrice, "Send 3×"]),
       ]),
       el("div", { className: "row", style: "margin-top:8px" }, [
         name,
