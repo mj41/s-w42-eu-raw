@@ -747,7 +747,7 @@ func TestReconnectingRobotHearsItIsPaired(t *testing.T) {
 	again := connectRobot(t, ts, "chan-1", wire.ClassRobot)
 	var paired wire.PairedBody
 	again.expect(wire.KindPaired, &paired)
-	if paired.Viewers != 1 {
-		t.Fatalf("viewers after reconnect: %d, want 1", paired.Viewers)
+	if paired.Viewers != 1 || !paired.Reconnect {
+		t.Fatalf("after reconnect: %+v, want 1 viewer and reconnect", paired)
 	}
 }

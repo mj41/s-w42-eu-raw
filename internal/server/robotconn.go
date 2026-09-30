@@ -122,7 +122,7 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 	// Browsers paired before (pairings survive restarts): tell the robot right away, so
 	// it starts with its face instead of the QR screen.
 	if n := s.viewerCount(id); n > 0 {
-		if f, err := wire.Marshal(wire.KindPaired, wire.Meta{WorkerID: id}, wire.PairedBody{Viewers: n}); err == nil {
+		if f, err := wire.Marshal(wire.KindPaired, wire.Meta{WorkerID: id}, wire.PairedBody{Viewers: n, Reconnect: true}); err == nil {
 			c.enqueue(f)
 		}
 	}

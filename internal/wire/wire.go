@@ -100,6 +100,9 @@ type PairCodeBody struct {
 // PairedBody tells the robot a browser just paired; Viewers is the total count.
 type PairedBody struct {
 	Viewers int `json:"viewers"`
+	// Reconnect: sent right after Accepted because browsers were paired before, not
+	// because someone just scanned. A robot showing its QR on purpose may keep it.
+	Reconnect bool `json:"reconnect,omitempty"`
 }
 
 // RobotCommandBody is one command. The "basic" command set a Stack-chan offers:
