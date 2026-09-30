@@ -178,6 +178,7 @@ const SENSOR_LABELS = {
   light_lux: ["Light", " lux"], proximity: ["Proximity", " (0–2047)"],
   body_battery_v: ["Body battery", " V"], body_current_ma: ["Body current (+ draw, − charge)", " mA"], body_power_mw: ["Body power (+ draw)", " mW"],
   body_shunt_uv: ["Body shunt (raw)", " µV"],
+  usb_data: ["Computer on CoreS3 USB", ""],
   core_battery_v: ["Core battery", " V"], core_vbus_v: ["USB input", " V"], core_system_v: ["Core system", " V"],
   core_charge: ["Core charge", ""], core_charge_phase: ["Charge phase", ""], pmic_temp_c: ["Power chip temp", " °C"],
   pmic_status1: ["PMIC status 1 (raw)", ""], pmic_status2: ["PMIC status 2 (raw)", ""],
@@ -187,6 +188,7 @@ const SENSOR_FORMAT = {
   core_charge: (v) => ["idle", "charging", "discharging"][v] ?? v,
   core_charge_phase: (v) => ["trickle", "pre-charge", "constant current", "constant voltage", "done", "not charging"][v] ?? v,
   pmic_status1: (v) => hex(v), pmic_status2: (v) => hex(v),
+  usb_data: (v) => (v ? "yes" : "no"),
 };
 
 function el(tag, props = {}, children = []) {
