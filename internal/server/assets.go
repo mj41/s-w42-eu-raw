@@ -16,8 +16,8 @@ import (
 // "asset_saved" {name, bytes, crc} or "asset_error" {name, reason} event.
 
 const (
-	maxAssetBytes  = 2 << 20
-	uploadHeader   = "X-Stackchan-Upload" // a custom header forces a CORS preflight: no cross-site uploads
+	maxAssetBytes = 2 << 20
+	uploadHeader  = "X-Stackchan-Upload" // a custom header forces a CORS preflight: no cross-site uploads
 )
 
 // Relative paths: parts of letters, digits, '.', '_', '-', not starting with '.'.
