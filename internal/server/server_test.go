@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -51,7 +52,7 @@ func connectRobot(t *testing.T, ts *httptest.Server, id string, class string) *t
 	r := &testRobot{t: t, ws: ws}
 	r.send(wire.KindRegister, wire.RegisterBody{
 		Class:        class,
-		Capabilities: wire.RobotCapabilities{Model: "test", Commands: []string{"nod", "ping", "camera", "mic", "image", "speaker"}},
+		Capabilities: wire.RobotCapabilities{Model: "test", Commands: []string{"nod", "ping", "camera", "mic", "image", "speaker", "assets"}},
 	})
 	return r
 }
@@ -749,5 +750,56 @@ func TestReconnectingRobotHearsItIsPaired(t *testing.T) {
 	again.expect(wire.KindPaired, &paired)
 	if paired.Viewers != 1 || !paired.Reconnect {
 		t.Fatalf("after reconnect: %+v, want 1 viewer and reconnect", paired)
+	}
+}
+
+func TestAssetUploadInChunks(t *testing.T) {
+	ts, _ := newTestServer(t)
+	robot := connectRobot(t, ts, "chan-1", wire.ClassRobot)
+	browser := pairBrowser(t, robot)
+
+	upload := func(name string, body []byte, header bool) int {
+		req, _ := http.NewRequest("POST", ts.URL+"/api/robots/chan-1/assets?name="+name, bytes.NewReader(body))
+		if header {
+			req.Header.Set("X-Stackchan-Upload", "1")
+		}
+		resp, err := browser.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := upload("a.png", []byte{1}, false); code != http.StatusBadRequest {
+		t.Fatalf("without the upload header: %d", code)
+	}
+	for _, bad := range []string{"../x", ".hidden", "a//b", "a/.b", ""} {
+		if code := upload(bad, []byte{1}, true); code != http.StatusBadRequest {
+			t.Fatalf("name %q: %d", bad, code)
+		}
+	}
+
+	data := make([]byte, 70_000) // three chunks
+	for i := range data {
+		data[i] = byte(i)
+	}
+	if code := upload("food/cake.png", data, true); code != http.StatusAccepted {
+		t.Fatalf("upload: %d", code)
+	}
+	var got []byte
+	for off := 0; off < len(data); {
+		msg := robot.expectBinary()
+		if msg[0] != wire.BinAssetChunk || string(msg[2:2+msg[1]]) != "food/cake.png" {
+			t.Fatalf("chunk header % x", msg[:16])
+		}
+		rest := msg[2+msg[1]:]
+		if total, offset := binary.LittleEndian.Uint32(rest), binary.LittleEndian.Uint32(rest[4:]); total != 70_000 || int(offset) != off {
+			t.Fatalf("total %d offset %d, want 70000 %d", total, offset, off)
+		}
+		got = append(got, rest[8:]...)
+		off += len(rest) - 8
+	}
+	if !bytes.Equal(got, data) {
+		t.Fatal("reassembled file differs")
 	}
 }

@@ -159,6 +159,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/robots/{id}/picture", s.handlePicture)
 	mux.HandleFunc("GET /api/robots/{id}/media", s.handleMedia)
 	mux.HandleFunc("GET /api/robots/{id}/snapshot", s.handleSnapshot)
+	mux.HandleFunc("POST /api/robots/{id}/assets", s.handleAssetUpload)
 	mux.Handle("GET /emoji/", http.StripPrefix("/emoji/", s.emojiFiles()))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok\n")) })
 	return mux

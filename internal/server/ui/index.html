@@ -117,6 +117,9 @@ function describeCommand(cmd, a) {
     case "leds": text = "LEDs " + (a.effect || (a.pixels ? "single LEDs" : [a.left, a.right].filter(Boolean).join(" "))); break;
     case "say": text = `say “${a.text || ""}”`; break;
     case "picture": text = `picture (${Math.round((a.bytes || 0) / 1024)} KB)`; break;
+    case "asset_upload": text = `upload ${a.name} (${Math.round((a.bytes || 0) / 1024)} KB)`; break;
+    case "asset_delete": text = `delete ${a.name}`; break;
+    case "assets": text = "list files"; break;
     default:
       text = cmd.replaceAll("_", " ") + " " +
         Object.entries(a).map(([k, v]) => `${k} ${typeof v === "object" ? JSON.stringify(v) : v}`).join(", ");
@@ -488,6 +491,64 @@ function makeCard(r) {
         } })]),
       el("div", { className: "muted", style: "font-size:0.85rem;margin-top:6px",
         textContent: "On the robot, the QR screen (QR button in the swipe-up bar) switches servers with Next and pins the shown one as the default with Pin (tap again to unpin: then the robot asks at start)." }));
+  }
+
+  if (has("assets")) {
+    // The robot's file store (pictures and sounds for apps, ~1.9 MB): the list comes from its
+    // "assets" event; uploads go to the server, which sends them to the robot in chunks.
+    const list = el("div");
+    const space = el("div", { className: "muted", style: "font-size:0.85rem" });
+    const log = el("div", { className: "muted", style: "font-size:0.85rem;white-space:pre-wrap;margin-top:6px" });
+    const folder = el("input", { className: "code", style: "width:140px", placeholder: "folder (optional)", ariaLabel: "Folder" });
+    const pick = el("input", { type: "file", multiple: true, ariaLabel: "Files to upload" });
+    const pending = {}; // name -> CRC-32 of what was sent, checked against the robot's
+    const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+    const crc32 = (buf) => { let c = 0xFFFFFFFF; for (const b of new Uint8Array(buf)) c = crcTable[(c ^ b) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+    const kb = (n) => (n / 1024).toFixed(n < 10240 ? 1 : 0) + " KB";
+    const note = (text) => { log.textContent = (text + "\n" + log.textContent).split("\n").slice(0, 8).join("\n"); };
+    c.onAssets = (d) => {
+      let files = [];
+      try { files = JSON.parse(d.list || "{}").files || []; } catch { /* keep empty */ }
+      space.textContent = d.mounted === 0 ? "No file store on the robot (partition not mounted)."
+        : `${files.length} files · ${kb(d.free || 0)} free of ${kb(d.total || 0)}`;
+      list.replaceChildren(...files.sort((a, b) => a.name.localeCompare(b.name)).map((f) => el("div", { className: "row", style: "margin-top:4px" }, [
+        el("span", { className: "code", style: "min-width:180px", textContent: f.name }),
+        el("span", { className: "muted", style: "font-size:0.85rem", textContent: `${kb(f.bytes)} · crc ${f.crc.toString(16).padStart(8, "0")}` }),
+        el("button", { className: "soft", textContent: "Delete", onclick: () => { if (confirm(`Delete ${f.name} on the robot?`)) run("asset_delete", { name: f.name }, "delete " + f.name); } }),
+      ])));
+    };
+    c.onAssetEvent = (name, d) => {
+      if (name === "asset_saved") {
+        const want = pending[d.name];
+        delete pending[d.name];
+        note(`${d.name}: saved, ${kb(d.bytes)}` + (want === undefined ? "" : want === d.crc ? ", CRC matches ✓" : ", CRC DIFFERS ✗"));
+      } else if (name === "asset_error") {
+        delete pending[d.name];
+        note(`${d.name || "?"}: ${d.reason}`);
+      }
+      run("assets", {}, "list files");
+    };
+    const upload = async () => {
+      const dir = folder.value.trim().replace(/^\/+|\/+$/g, "");
+      for (const file of pick.files) {
+        const name = (dir ? dir + "/" : "") + file.name.replace(/[^A-Za-z0-9._-]/g, "_");
+        const buf = await file.arrayBuffer();
+        pending[name] = crc32(buf);
+        note(`${name}: sending ${kb(buf.byteLength)}…`);
+        const res = await fetch(`/api/robots/${encodeURIComponent(c.id)}/assets?name=${encodeURIComponent(name)}`,
+          { method: "POST", headers: { "X-Stackchan-Upload": "1", "Content-Type": "application/octet-stream" }, body: buf });
+        if (!res.ok) { delete pending[name]; note(`${name}: ${(await res.text()).trim()}`); }
+      }
+      pick.value = "";
+    };
+    sections.push(el("h2", { textContent: "Files" }), space, list,
+      el("div", { className: "row", style: "margin-top:10px" }, [folder, pick,
+        el("button", { className: "soft", textContent: "Upload", onclick: upload }),
+        el("button", { className: "soft", textContent: "Refresh", onclick: () => run("assets", {}, "list files") })]),
+      log,
+      el("div", { className: "muted", style: "font-size:0.85rem;margin-top:6px",
+        textContent: "Pictures (PNG with transparency, JPEG) and sounds for apps, kept on the robot across reboots. Names: letters, digits, . _ - and / for folders." }));
+    setTimeout(() => run("assets", {}, "list files"), 500);
   }
 
   if (has("nfc")) {
@@ -1189,8 +1250,12 @@ function makeCard(r) {
     if (ev.name === "ir_received" && c.onIr) c.onIr(ev.data || {});
     if (ev.name === "nfc_tag" && c.onNfc) c.onNfc(ev.data || {});
     if (ev.name === "servers" && c.onServers) c.onServers(ev.data || {});
+    if (ev.name === "assets" && c.onAssets) c.onAssets(ev.data || {});
+    if (/^asset_(saved|error|deleted)$/.test(ev.name) && c.onAssetEvent && Date.now() - Date.parse(ev.ts) < 60000) c.onAssetEvent(ev.name, ev.data || {});
     const d = ev.data || {};
-    const where = "x" in d ? ` (${d.x}, ${d.y})`
+    const where = ev.name === "assets" ? ` (${(() => { try { return JSON.parse(d.list).files.length; } catch { return "?"; } })()} files, ${Math.round((d.free || 0) / 1024)} KB free)`
+      : ev.name.startsWith("asset_") ? ` ${d.name || ""}` + ("bytes" in d ? ` (${d.bytes} bytes)` : "") + (d.reason ? `: ${d.reason}` : "")
+      : "x" in d ? ` (${d.x}, ${d.y})`
       : "manual" in d ? (d.manual ? " (manual)" : " (auto)")
       : "list" in d ? ` (${(() => { try { return JSON.parse(d.list).length; } catch { return "?"; } })()} servers)`
       : "reg" in d ? ` ${hex(d.reg)} = ${d.value < 0 ? "failed" : hex(d.value)}`

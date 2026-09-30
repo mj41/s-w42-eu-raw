@@ -128,6 +128,8 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 | `camera_reg` | `{"reg": n}` reads, `{"reg": n, "value": v}` writes and reads back a raw GC0308 register; answer: event `camera_reg` `{"reg", "value"}` (−1 on failure) |
 | `servo_power` | `{"on": bool}`: both head servos powered or limp. Events `servo_power_on` / `servo_power_off`, telemetry `servo_power` |
 | `rotate` | `{"velocity": -1000..1000, "seconds": 1..30, "no_head_cable": true}`: continuous yaw rotation, refused (`rotate_refused` `{"reason"}`) without `no_head_cable`, stopped by `velocity: 0`, by any other head command, standby or the time limit. Events `rotate_on` / `rotate_off`, telemetry `rotate_s` |
+| `assets` | none: the robot answers with an `assets` event, `list` = `{"files": [{"name", "bytes", "crc"}]}` (CRC-32 IEEE) plus `total` and `free` bytes |
+| `asset_delete` | `{"name": "food/cake.png"}`: answered by `asset_deleted` or `asset_error` |
 | `touch_stream`, `imu_stream`, `light_stream` | `{"on": bool}`: sent by the server while a browser has `?touch=1` / `?imu=1` / `?light=1` open (an app server such as stackchan-pet may send `light_stream` itself) |
 | `server_add` | `{"url": "ws://…" or "wss://…", "name", "token"}`: add (or update) an entry in the robot's server list, stored on the robot |
 | `server_remove`, `server_default`, `server_switch` | `{"server": url or name}`: remove an entry (not the built-in or current one), make it the one used at start (`""` = no default: the robot starts as a chooser), or switch to it now (the robot leaves this server) |
@@ -150,6 +152,7 @@ The first byte is the type, followed by the payload.
 | `0x07` | robot → server | full-resolution JPEG still (the `snapshot` command); the server keeps the latest and serves it at `GET /api/robots/{id}/snapshot` (SSE `snapshot` `{"robot", "bytes", "ts"}`) |
 | `0x03` | browser → server → robot | speaker: sample rate (uint16 LE), then s16le mono PCM. Sent on the media socket; forwarded only to robots that list `speaker` |
 | `0x10` | server → robot | picture, JPEG 320x240, shown instead of the face |
+| `0x11` | server → robot | part of a file for the robot's file store: name length (uint8), name (e.g. `food/cake.png`), total size and offset (uint32 LE each), data; sent in order in 32 KB chunks by `POST /api/robots/{id}/assets?name=…` (header `X-Stackchan-Upload: 1`, the file as the body, max 2 MB) |
 
 ### Browser API
 

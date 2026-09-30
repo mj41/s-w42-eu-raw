@@ -126,6 +126,9 @@ type PairedBody struct {
 //	imu_stream {"on": bool}                    sent by the server while browsers want BinIMU
 //	touch_stream {"on": bool}                  sent by the server while browsers want BinTouch
 //	light_stream {"on": bool}                  sent while browsers (or an app) want BinLight
+//	assets                                     answered by an "assets" event: {"list": "{\"files\": [{name, bytes, crc}]}", total, free}
+//	asset_delete {"name": "food/cake.png"}     answered by "asset_deleted" or "asset_error"
+//	asset upload                               (no JSON: files arrive as BinAssetChunk)
 //	servo_power {"on": bool}                   power both head servos (off: limp)
 //	rotate     {"velocity": -1000..1000, "seconds": 1..30, "no_head_cable": true}  continuous yaw
 //	snapshot                                   full-resolution still, arrives as BinSnapshot
@@ -187,6 +190,11 @@ const (
 	// The server keeps the latest per robot and serves it at /api/robots/{id}/snapshot.
 	BinSnapshot byte = 0x07
 	BinShowJPEG byte = 0x10 // server -> robot: picture (JPEG, 320x240) shown instead of the face
+	// BinAssetChunk: server -> robot: part of a file for the robot's file store: uint8 name
+	// length, name (relative path, e.g. "food/cake.png"), uint32 LE total size, uint32 LE
+	// offset, then the data. Chunks come in order from offset 0; the robot answers the last
+	// one with an "asset_saved" {name, bytes, crc} event (CRC-32 IEEE), or "asset_error".
+	BinAssetChunk byte = 0x11
 )
 
 // RobotPongBody answers the "ping" command. QueueMs is how long the ping
