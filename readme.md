@@ -133,6 +133,7 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 | `sprite` | `{"id", "asset", "x", "y", "scale", "angle", "opacity", "z", "hidden", "ms"}`: a stored picture (PNG with transparency, or JPEG) over the face; `x`, `y` is its center in screen pixels, `ms` glides it there; a new id needs `asset`; up to 24; `sprite_error` {id, reason} if it cannot be shown |
 | `sprite_hide`, `sprite_clear` | `{"id"}` / none: remove one sprite / all |
 | `picture` | `{"asset": "pet/dream.jpg"}`: a stored picture instead of the face (`face` ends it) |
+| `play` | `{"asset": "snd/hello.wav", "volume": 0..100}`: a stored WAV (16-bit PCM, mono or stereo, 4-48 kHz), streamed from the file so any length works; `sound_done` {asset} at the end, `sound_error` {asset, reason}; `play_stop` ends it |
 | `touch_stream`, `imu_stream`, `light_stream` | `{"on": bool}`: sent by the server while a browser has `?touch=1` / `?imu=1` / `?light=1` open (an app server such as stackchan-pet may send `light_stream` itself) |
 | `server_add` | `{"url": "ws://…" or "wss://…", "name", "token"}`: add (or update) an entry in the robot's server list, stored on the robot |
 | `server_remove`, `server_default`, `server_switch` | `{"server": url or name}`: remove an entry (not the built-in or current one), make it the one used at start (`""` = no default: the robot starts as a chooser), or switch to it now (the robot leaves this server) |

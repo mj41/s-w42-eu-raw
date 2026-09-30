@@ -120,6 +120,7 @@ function describeCommand(cmd, a) {
     case "asset_upload": text = `upload ${a.name} (${Math.round((a.bytes || 0) / 1024)} KB)`; break;
     case "asset_delete": text = `delete ${a.name}`; break;
     case "assets": text = "list files"; break;
+    case "play": text = `play ${a.asset}`; break;
     case "sprite": text = `sprite ${a.id}` + (a.asset ? ` = ${a.asset}` : "") + ("x" in a ? ` at ${a.x},${a.y}` : "") + (a.ms ? ` in ${a.ms} ms` : ""); break;
     default:
       text = cmd.replaceAll("_", " ") + " " +
@@ -520,6 +521,7 @@ function makeCard(r) {
           run("sprite", { id: f.name.slice(-16), asset: f.name, x: 160, y: 120, scale: 1 }, "show " + f.name);
           run("sprite", { id: f.name.slice(-16), x: 60 + Math.round(Math.random() * 200), y: 50 + Math.round(Math.random() * 140), ms: 600 }, "move " + f.name);
         } }),
+        /\.wav$/i.test(f.name) && has("play") && el("button", { className: "soft", textContent: "Play", onclick: () => run("play", { asset: f.name }, "play " + f.name) }),
         el("button", { className: "soft", textContent: "Delete", onclick: () => { if (confirm(`Delete ${f.name} on the robot?`)) run("asset_delete", { name: f.name }, "delete " + f.name); } }),
       ].filter(Boolean))));
     };
@@ -554,7 +556,7 @@ function makeCard(r) {
         has("sprite") && el("button", { className: "soft", textContent: "Hide sprites", onclick: () => run("sprite_clear", {}, "hide sprites") })].filter(Boolean)),
       log,
       el("div", { className: "muted", style: "font-size:0.85rem;margin-top:6px",
-        textContent: "Pictures (PNG with transparency, JPEG) and sounds for apps, kept on the robot across reboots. Names: letters, digits, . _ - and / for folders." }));
+        textContent: "Pictures (PNG with transparency, JPEG) and sounds (WAV, 16-bit PCM) for apps, kept on the robot across reboots. Names: letters, digits, . _ - and / for folders." }));
     setTimeout(() => run("assets", {}, "list files"), 500);
   }
 

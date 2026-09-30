@@ -133,6 +133,7 @@ type PairedBody struct {
 //	sprite     {"id", "asset", "x", "y", "scale", "angle", "opacity", "z", "hidden", "ms"}  a stored picture over the face (x, y = center; ms = glide time)
 //	sprite_hide {"id"} / sprite_clear          remove one / all sprites
 //	picture    {"asset"}                       a stored picture instead of the face
+//	play       {"asset", "volume": 0..100}     a stored WAV (16-bit PCM); "sound_done" at the end; play_stop ends it
 //	servo_power {"on": bool}                   power both head servos (off: limp)
 //	rotate     {"velocity": -1000..1000, "seconds": 1..30, "no_head_cable": true}  continuous yaw
 //	snapshot                                   full-resolution still, arrives as BinSnapshot
