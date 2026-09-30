@@ -105,6 +105,7 @@ type PairedBody struct {
 //	image                                      (no JSON: pictures arrive as BinShowJPEG)
 //	camera     {"on": bool}                    sent by the server while browsers watch
 //	mic        {"on": bool}                    sent by the server while browsers listen
+//	imu_stream {"on": bool}                    sent by the server while browsers want BinIMU
 //	screensaver {"on": bool}                   blank the screen / wake it
 //	standby    {"minutes": 1..120}             offline with the screen off
 //	speaker                                    (no JSON: audio arrives as BinSpeakerPCM)
@@ -139,7 +140,14 @@ const (
 	BinCameraJPEG byte = 0x01 // robot -> server -> browser: camera frame (JPEG)
 	BinAudioPCM   byte = 0x02 // robot -> server -> browser: microphone, uint16 LE sample rate then s16le mono PCM
 	BinSpeakerPCM byte = 0x03 // browser -> server -> robot: speaker, same layout as BinAudioPCM
-	BinShowJPEG   byte = 0x10 // server -> robot: picture (JPEG, 320x240) shown instead of the face
+	// BinAudioMulti: robot -> server -> browser: microphone, all codec channels:
+	// uint16 LE sample rate, uint8 channel count, then interleaved s16le PCM.
+	BinAudioMulti byte = 0x04
+	// BinIMU: robot -> server -> browser: raw IMU samples (100 Hz) while a browser asks
+	// for them: uint16 LE count, then per sample uint32 LE time (ms) and 9 float32 LE:
+	// accel x/y/z (m/s^2), gyro x/y/z (deg/s), magnetic x/y/z (uT).
+	BinIMU      byte = 0x05
+	BinShowJPEG byte = 0x10 // server -> robot: picture (JPEG, 320x240) shown instead of the face
 )
 
 // RobotPongBody answers the "ping" command. QueueMs is how long the ping

@@ -30,6 +30,7 @@ type mediaSub struct {
 	session string
 	video   bool
 	audio   bool
+	imu     bool
 	out     chan []byte
 	sent    int // written by handleMedia
 	dropped int // under Server.mu
@@ -52,18 +53,20 @@ func (s *Server) relayMedia(robotID string, msg []byte) {
 		return
 	}
 	kind := msg[0]
+	stat := map[byte]int{wire.BinCameraJPEG: 0, wire.BinAudioPCM: 1, wire.BinAudioMulti: 1, wire.BinIMU: 2}
+	i, known := stat[kind]
+	if !known {
+		return // only media types go to browsers
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if st := s.robots[robotID]; st != nil && (kind == wire.BinCameraJPEG || kind == wire.BinAudioPCM) {
-		i := 0
-		if kind == wire.BinAudioPCM {
-			i = 1
-		}
+	if st := s.robots[robotID]; st != nil {
 		st.mediaFrames[i]++
 		st.mediaBytes[i] += len(msg)
 	}
 	for sub := range s.media {
-		if sub.robot != robotID || (kind == wire.BinCameraJPEG && !sub.video) || (kind == wire.BinAudioPCM && !sub.audio) {
+		wants := [3]bool{sub.video, sub.audio, sub.imu}[i]
+		if sub.robot != robotID || !wants {
 			continue
 		}
 		select {
@@ -81,11 +84,12 @@ func (s *Server) syncMedia(robotID string) {
 	if st == nil || st.conn == nil {
 		return
 	}
-	var wantVideo, wantAudio bool
+	var wantVideo, wantAudio, wantIMU bool
 	for sub := range s.media {
 		if sub.robot == robotID {
 			wantVideo = wantVideo || sub.video
 			wantAudio = wantAudio || sub.audio
+			wantIMU = wantIMU || sub.imu
 		}
 	}
 	send := func(command string, on bool) {
@@ -103,6 +107,10 @@ func (s *Server) syncMedia(robotID string) {
 		st.micOn = wantAudio
 		send("mic", wantAudio)
 	}
+	if wantIMU != st.imuOn && slices.Contains(st.caps.Commands, "imu_stream") {
+		st.imuOn = wantIMU
+		send("imu_stream", wantIMU)
+	}
 }
 
 // handleMedia streams a paired robot's camera (?video=1) and microphone
@@ -111,7 +119,7 @@ func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
 	session := s.session(w, r)
 	id := r.PathValue("id")
 	q := r.URL.Query()
-	sub := &mediaSub{robot: id, session: session, video: q.Get("video") == "1", audio: q.Get("audio") == "1",
+	sub := &mediaSub{robot: id, session: session, video: q.Get("video") == "1", audio: q.Get("audio") == "1", imu: q.Get("imu") == "1",
 		out: make(chan []byte, 8)}
 
 	s.mu.Lock()
@@ -265,15 +273,16 @@ func (s *Server) logMediaStats(robotID string) {
 		return
 	}
 	frames, bytes := st.mediaFrames, st.mediaBytes
-	st.mediaFrames, st.mediaBytes, st.mediaStatsAt = [2]int{}, [2]int{}, time.Now()
-	if !st.cameraOn && !st.micOn && frames == [2]int{} {
+	st.mediaFrames, st.mediaBytes, st.mediaStatsAt = [3]int{}, [3]int{}, time.Now()
+	if !st.cameraOn && !st.micOn && !st.imuOn && frames == [3]int{} {
 		return
 	}
 	secs := elapsed.Seconds()
 	attrs := []any{"robot", robotID, "camera", st.cameraOn, "mic", st.micOn,
 		"video_fps", round1(float64(frames[0]) / secs), "video_kbps", round1(float64(bytes[0]) / 1024 / secs),
-		"audio_msgs", frames[1], "audio_kbps", round1(float64(bytes[1]) / 1024 / secs)}
-	if (st.cameraOn && frames[0] == 0) || (st.micOn && frames[1] == 0) {
+		"audio_msgs", frames[1], "audio_kbps", round1(float64(bytes[1]) / 1024 / secs),
+		"imu", st.imuOn, "imu_msgs", frames[2]}
+	if (st.cameraOn && frames[0] == 0) || (st.micOn && frames[1] == 0) || (st.imuOn && frames[2] == 0) {
 		s.log.Warn("media stalled: robot sends nothing for a stream that is on", attrs...)
 		return
 	}

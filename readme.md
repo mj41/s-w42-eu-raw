@@ -19,6 +19,7 @@ For each paired robot:
 - **LEDs:** one colour for all 12 LEDs, "Random" (a random colour per LED, for a quick test) and "Off"; effects drawn by the robot (Rainbow, Breathe, Chase, Blink) in that colour at three speeds; and a picker per LED.
 - **Settings:** brightness and volume.
 - **Screen:** stickers over the face (heart, angry, sweat, shy, dizzy), 12 emoji (smile, grin, laugh, wink, love, cool, surprised, thinking, sleepy, cry, sob, angry) sent as a full-screen picture, or a picture from the phone. The picture is scaled to 320x240 in the browser and replaces the face until "Face".
+- **Live IMU** (under Sensors): raw accelerometer, gyro and magnetometer at 100 Hz while the button is on (the robot streams only while someone watches), with "Download CSV" of up to 60 s.
 - **Camera & mic:** live video (JPEG, about 5 fps) and the robot's microphone, played through Web Audio. The robot streams only while someone watches or listens, and shows a red LIVE badge meanwhile.
 - **Speaker:** "Talk" (tap to start, tap again to stop) streams your microphone to the robot, "Play sound file" plays any audio file the browser can decode, and "Beep" is a test tone. Audio is resampled to 24 kHz in the browser and the robot's mouth moves while it plays. Browsers give the microphone only to secure pages: use `http://localhost` on the server machine, or run the server with `-tls-listen :8766` and open `https://<LAN IP>:8766` on the phone (the plain page links to it; accept the self-signed certificate warning once). Files and Beep work anywhere.
 - **Infrared:** point a TV remote at the robot and press a button: the last code shows up with "Send again" and "Save…" (a named button, kept in this browser). "NEC address / command" sends a code by hand (a received NEC code fills it in), and "Add to list" saves it under a name, so you can try a few commands side by side. "Tap / Hold 0.5–2 s" sets how long every send holds the button (default 0.5 s: frame plus repeat codes, like a real press). "Send 3×" sends the whole code three times, for when the robot's weak IR LED only sometimes gets through. "Test LED (3 s)" lights the IR LED long enough to see it through a phone camera; "Self-test" checks that the robot hears its own signal (carrier and timing).
@@ -128,6 +129,8 @@ The first byte is the type, followed by the payload.
 |---|---|---|
 | `0x01` | robot → server → browser | camera frame, JPEG |
 | `0x02` | robot → server → browser | microphone: sample rate (uint16 LE), then s16le mono PCM |
+| `0x04` | robot → server → browser | microphone, all codec channels: sample rate (uint16 LE), channel count (uint8), then interleaved s16le PCM (the dashboard plays channel 0, 1 or both as stereo) |
+| `0x05` | robot → server → browser | raw IMU while a browser has `?imu=1` open: count (uint16 LE), then per sample time (uint32 LE ms) and 9 float32 LE: accel m/s², gyro °/s, magnetic µT |
 | `0x03` | browser → server → robot | speaker: sample rate (uint16 LE), then s16le mono PCM. Sent on the media socket; forwarded only to robots that list `speaker` |
 | `0x10` | server → robot | picture, JPEG 320x240, shown instead of the face |
 
@@ -144,7 +147,7 @@ All endpoints need the session cookie of a browser that paired with the robot.
 | `GET /api/events` | SSE: `robot` (full state; telemetry `screensaver` 0 off / 1 auto / 2 manual), `robot_event` and `command_sent` (`{"robot", "seq", "command", "args", "ts"}`: what a browser sent; both go to every paired browser, and the last 40 are replayed on connect), `pong` (only to the browser that pinged), `join_request` / `join_closed` / `join_result` (see `/api/join`) |
 | `POST /api/robots/{id}/command` | `{"command", "args"}` as JSON |
 | `POST /api/robots/{id}/picture` | `image/jpeg` body, up to 192 KB |
-| `GET /api/robots/{id}/media?video=1&audio=1` | WebSocket, same origin only, carrying binary `0x01`/`0x02` |
+| `GET /api/robots/{id}/media?video=1&audio=1&imu=1` | WebSocket, same origin only, carrying binary `0x01` (video), `0x02`/`0x04` (audio), `0x05` (imu) for what was asked; the server turns camera, mic and IMU stream on while at least one browser wants them |
 
 **Liveness:** the server sends a WebSocket ping every 5 s and drops the robot after 60 s without traffic. Reconnect with backoff from 1 s up to 30 s.
 

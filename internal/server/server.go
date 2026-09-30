@@ -79,8 +79,9 @@ type robotState struct {
 	// From the robot's "standby" event: when it plans to reconnect.
 	standbyUntil time.Time
 	micOn        bool
+	imuOn        bool // imu_stream, like cameraOn
 	// Media received from the robot since mediaStatsAt: [0] camera, [1] microphone.
-	mediaFrames, mediaBytes [2]int
+	mediaFrames, mediaBytes [3]int // [0] camera, [1] microphone, [2] IMU
 	mediaStatsAt            time.Time
 }
 
@@ -177,7 +178,7 @@ func (s *Server) attach(c *robotConn, reg wire.RegisterBody) {
 	st.labels = reg.Labels
 	st.lastSeen = time.Now()
 	// A fresh connection starts with camera and mic off (see handleRobotConnect).
-	st.cameraOn, st.micOn = false, false
+	st.cameraOn, st.micOn, st.imuOn = false, false, false
 	st.standbyUntil = time.Time{} // back online
 	s.mu.Unlock()
 
