@@ -116,6 +116,7 @@ type PairedBody struct {
 //	say        {"text": "...", "seconds": 6}   speech bubble
 //	leds       {"left": "#rrggbb", "right": "#rrggbb"}  fade a side; also
 //	           {"pixels": ["#rrggbb" or null, ...]}   12 single LEDs, left 0-5, right 6-11
+//	           (left 0 is at the screen end, right 11 is: the right strip runs from the back)
 //	           {"effect": "rainbow|breathe|chase|blink|off", "color", "speed": 0.2..5, "seconds"}
 //	brightness {"value": 1..100} by hand (ends auto), or {"auto": bool} to follow the room light
 //	volume     {"value": 0..100}
@@ -158,7 +159,9 @@ type RobotCommandBody struct {
 // RobotEventBody reports something that happened on the robot: "shake",
 // "head_press" with the zone intensities {"z0", "z1", "z2"} (0-3),
 // "head_release" with {"ms"}, "head_swipe_forward", "head_swipe_backward", "screen_tap"
-// and "screen_long_press" with data {"x", "y"} in screen pixels (320x240) and what the
+// (anywhere on the face, its eyes and mouth too; a double tap blanks the screen, except
+// on a "tap" sprite, where it is two taps) and "screen_long_press" with data {"x", "y"}
+// in screen pixels (320x240) and what the
 // finger hit: "sprite" (the topmost sprite with "tap"), its "asset", "sprite_x" and
 // "sprite_y" (the point in that picture's pixels), and "picture" (the full-screen
 // picture shown: its file, or "sent"), "nfc_tag" with data

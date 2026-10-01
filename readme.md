@@ -37,7 +37,7 @@ For each paired robot:
 - **Screen & power** (right after Events): "Screensaver on" / "Screensaver off", and "Standby" for 1–60 min.
   - **Status** shows the screensaver as `off`, `auto` or `manual`.
   - **Auto:** the robot blanks after 60 s (firmware option) without touch **and** without commands or live media, so using it remotely keeps it awake.
-  - **Manual:** a **double tap** on the robot or "Screensaver on". The robot keeps it until a touch or "Screensaver off".
+  - **Manual:** a **double tap** on the robot or "Screensaver on". The robot keeps it until a touch or "Screensaver off". A double tap on a button (a sprite with `tap`) is two taps instead, for games and menus.
   - **Commands wake the screen** (checkbox, on by default): the dashboard follows every command (except ping), and every picture, with `screensaver off` when the screen is blank. The robot stays explicit; the browser decides.
   - **Standby:** the robot tells the server, then goes offline with backlight, LEDs, camera and mic off. It comes back after the time or on a touch. Meanwhile the card shows "standby until HH:MM".
 
@@ -92,7 +92,7 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 |---|---|---|
 | robot → server | `Register` (must be first) | `{"class": "robot", "capabilities": {"model", "firmware", "commands": [...], "measurements": [...]}}` |
 | robot → server | `RobotTelemetry` | `{"measurements": {"battery_pct": 87.5}}` (values are numbers) |
-| robot → server | `RobotEvent` | `{"name", "data"}`: `shake`, `head_press` with zone intensities `{"z0", "z1", "z2"}` (0–3), `head_release` with `{"ms"}`, `head_swipe_forward`, `head_swipe_backward`, `screen_tap` with `{"x", "y"}`, `screensaver_on` with `{"manual": 0 or 1}`, `screensaver_off`, `standby` with `{"minutes"}`, `standby_end` with `{"touched"}`, `nfc_tag` with `{"uid": "04:A2:…", "type", "atqa", "sak"}` plus `"text"` when the tag holds an NDEF URI or text record, `nfc_removed` with `{"uid"}`, `proximity_near` / `proximity_far` with `{"value"}`, `ir_received` with `{"protocol": "nec" or "raw", "address", "command", "raw"}` (raw marks/spaces in µs, always present), `screen_long_press` with `{"x", "y"}` (free for apps), `servers` with `{"list": JSON array of {name, url, origin, token: bool}, "current", "default"}`, `power_button` with `{"press": "short" or "long"}`, `usb_plugged` / `usb_unplugged`, `battery_inserted` / `battery_removed`. Values are numbers or strings. Browsers also get a per-robot `seq` |
+| robot → server | `RobotEvent` | `{"name", "data"}`: `shake`, `head_press` with zone intensities `{"z0", "z1", "z2"}` (0–3), `head_release` with `{"ms"}`, `head_swipe_forward`, `head_swipe_backward`, `screen_tap` with `{"x", "y"}` (anywhere on the face, its eyes and mouth included), `screensaver_on` with `{"manual": 0 or 1}`, `screensaver_off`, `standby` with `{"minutes"}`, `standby_end` with `{"touched"}`, `nfc_tag` with `{"uid": "04:A2:…", "type", "atqa", "sak"}` plus `"text"` when the tag holds an NDEF URI or text record, `nfc_removed` with `{"uid"}`, `proximity_near` / `proximity_far` with `{"value"}`, `ir_received` with `{"protocol": "nec" or "raw", "address", "command", "raw"}` (raw marks/spaces in µs, always present), `screen_long_press` with `{"x", "y"}` (free for apps), `servers` with `{"list": JSON array of {name, url, origin, token: bool}, "current", "default"}`, `power_button` with `{"press": "short" or "long"}`, `usb_plugged` / `usb_unplugged`, `battery_inserted` / `battery_removed`. Values are numbers or strings. Browsers also get a per-robot `seq` |
 | robot → server | `RobotPong` | `{"id", "queue_ms"}`: answer to `ping`; `queue_ms` is time spent waiting on the robot |
 | robot → server | `Heartbeat` | `{}`, every 30 s |
 | server → robot | `Accepted` / `Rejected` | `{}` / `{"reason": "..."}` |
@@ -117,7 +117,7 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 | `sticker` | `{"name": "heart\|angry\|sweat\|shy\|dizzy", "seconds"}`: decoration over the face |
 | `face` | none: back to the face after a picture |
 | `image` | capability only: pictures arrive as binary `0x10` |
-| `leds` | `{"left": "#rrggbb", "right": "#rrggbb"}` fades a whole side. `{"pixels": [...]}` sets up to 12 single LEDs (left 0–5, right 6–11; `null` skips one). `{"effect": "rainbow\|breathe\|chase\|blink\|off", "color", "speed": 0.2..5, "seconds"}` runs an animation on the robot (`seconds` 0 = until the next `leds`) |
+| `leds` | `{"left": "#rrggbb", "right": "#rrggbb"}` fades a whole side. `{"pixels": [...]}` sets up to 12 single LEDs (left 0–5, right 6–11; `null` skips one). Left 0 sits at the screen end of its strip, and so does right 11 (the right strip runs from the back). `{"effect": "rainbow\|breathe\|chase\|blink\|off", "color", "speed": 0.2..5, "seconds"}` runs an animation on the robot (`seconds` 0 = until the next `leds`) |
 | `brightness` | `{"value": 1..100}` sets it by hand and ends auto-brightness; `{"auto": bool}` switches brightness that follows the room light (robots with a light sensor report `auto_brightness`) |
 | `volume` | `{"value": 0..100}` |
 | `camera`, `mic` | `{"on": bool}`: sent by the server, not by browsers, while someone watches or listens |
