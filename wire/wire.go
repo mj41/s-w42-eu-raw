@@ -1,11 +1,10 @@
 // Package wire defines the robot <-> server WebSocket frames. It is public so other
 // servers the robot can switch to (e.g. stackchan-pet) speak the same protocol.
 //
-// Every frame is a JSON object {"kind", "meta", "body"}, the same envelope as
-// yolovm-pilot (~/work-stai/stai-yolovm/docs/yolovm-pilot/wire-protocol.md),
-// so a robot speaking this protocol can also register with that pilot as a
-// "robot"-class worker. Frames stay flat and small so the ESP-IDF side can
-// handle them with cJSON.
+// It implements the device wire protocol v1 specified in the home-w42-eu repo
+// (docs/wire-protocol.md), which is the reference: change the spec there first.
+// Every frame is a JSON object {"kind", "meta", "body"}. Frames stay flat and
+// small so the ESP-IDF side can handle them with cJSON.
 package wire
 
 import (
@@ -16,7 +15,7 @@ import (
 	"time"
 )
 
-// Connection handshake, shared with yolovm-pilot.
+// Connection handshake (wire protocol §1).
 const (
 	ConnectPath    = "/api/workers/connect"
 	WorkerIDHeader = "X-Yolovm-Worker-Id"
@@ -232,8 +231,8 @@ func Marshal(kind string, meta Meta, body any) ([]byte, error) {
 	return json.Marshal(Frame{Kind: kind, Meta: meta, Body: raw})
 }
 
-// Parse decodes one WebSocket message: a single frame or, as yolovm-pilot
-// allows for worker -> server, a JSON array of frames.
+// Parse decodes one WebSocket message: a single frame or, as the protocol
+// allows (wire protocol §2), a JSON array of frames.
 func Parse(data []byte) ([]Frame, error) {
 	data = bytes.TrimSpace(data)
 	if len(data) > 0 && data[0] == '[' {

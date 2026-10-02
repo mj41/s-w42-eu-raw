@@ -77,7 +77,7 @@ Constraints:
 
 ## Protocol
 
-The frame envelope and handshake are the same as yolovm-pilot's (`~/work-stai/stai-yolovm/docs/yolovm-pilot/wire-protocol.md`), so the same robot can also register there as a `robot`-class worker.
+This is the device wire protocol v1. Its reference specification is `docs/wire-protocol.md` in the `home-w42-eu` repo; the tables below are this server's view of it.
 
 **Connect:** `ws://<server>/api/workers/connect` with these headers:
 
