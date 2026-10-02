@@ -79,9 +79,9 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	id := r.Header.Get(wire.WorkerIDHeader)
+	id := wire.DeviceID(r.Header)
 	if !robotIDPattern.MatchString(id) {
-		http.Error(w, "missing or invalid "+wire.WorkerIDHeader, http.StatusBadRequest)
+		http.Error(w, "missing or invalid "+wire.DeviceIDHeader, http.StatusBadRequest)
 		return
 	}
 
@@ -149,7 +149,7 @@ func readRegister(ws *websocket.Conn, id string) (wire.RegisterBody, string) {
 	}
 	f := frames[0]
 	if f.Meta.WorkerID != "" && f.Meta.WorkerID != id {
-		return reg, "meta.worker_id does not match " + wire.WorkerIDHeader
+		return reg, "meta.worker_id does not match " + wire.DeviceIDHeader
 	}
 	if err := f.Decode(&reg); err != nil {
 		return reg, "invalid Register body"

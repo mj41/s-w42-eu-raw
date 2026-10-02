@@ -38,7 +38,7 @@ type testRobot struct {
 func dialRobot(ts *httptest.Server, token, id string) (*websocket.Conn, *http.Response, error) {
 	h := http.Header{}
 	h.Set("Authorization", "Bearer "+token)
-	h.Set(wire.WorkerIDHeader, id)
+	h.Set(wire.DeviceIDHeader, id)
 	return websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(ts.URL, "http")+wire.ConnectPath, h)
 }
 
@@ -801,5 +801,22 @@ func TestAssetUploadInChunks(t *testing.T) {
 	}
 	if !bytes.Equal(got, data) {
 		t.Fatal("reassembled file differs")
+	}
+}
+
+// Older firmware sends the legacy device id header; both must work.
+func TestLegacyDeviceIDHeader(t *testing.T) {
+	for _, header := range []string{wire.DeviceIDHeader, wire.LegacyDeviceIDHeader} {
+		h := http.Header{}
+		h.Set(header, "stackchan-legacy")
+		if got := wire.DeviceID(h); got != "stackchan-legacy" {
+			t.Errorf("%s: DeviceID = %q", header, got)
+		}
+	}
+	h := http.Header{}
+	h.Set(wire.DeviceIDHeader, "new")
+	h.Set(wire.LegacyDeviceIDHeader, "old")
+	if got := wire.DeviceID(h); got != "new" {
+		t.Errorf("both headers: DeviceID = %q, want the new one", got)
 	}
 }

@@ -99,7 +99,7 @@ type received struct {
 func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) error {
 	header := http.Header{}
 	header.Set("Authorization", "Bearer "+token)
-	header.Set(wire.WorkerIDHeader, id)
+	header.Set(wire.DeviceIDHeader, id)
 	ws, resp, err := websocket.DefaultDialer.Dial(url, header)
 	if err != nil {
 		if resp != nil {

@@ -88,7 +88,7 @@ This is the device wire protocol v1. Its reference specification is `docs/wire-p
 **Connect:** `ws://<server>/api/workers/connect` with these headers:
 
 - `Authorization: Bearer <robot token>`
-- `X-Yolovm-Worker-Id: <robot id>`: 1–64 of `[A-Za-z0-9._-]`
+- `X-Device-Id: <robot id>`: 1–64 of `[A-Za-z0-9._-]`. Firmware from before 2026-10-02 sends `X-Yolovm-Worker-Id` instead, which the server still accepts.
 
 ### JSON frames
 

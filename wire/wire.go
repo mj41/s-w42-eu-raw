@@ -12,14 +12,27 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 )
 
 // Connection handshake (wire protocol §1).
 const (
 	ConnectPath    = "/api/workers/connect"
-	WorkerIDHeader = "X-Yolovm-Worker-Id"
+	DeviceIDHeader = "X-Device-Id"
+	// LegacyDeviceIDHeader is what firmware before 2026-10-02 sends. Servers still
+	// accept it (DeviceID); clients send DeviceIDHeader. Removed in protocol v2.
+	LegacyDeviceIDHeader = "X-Yolovm-Worker-Id"
 )
+
+// DeviceID returns the device id a connecting device sent: X-Device-Id, or the
+// legacy header from older firmware.
+func DeviceID(h http.Header) string {
+	if id := h.Get(DeviceIDHeader); id != "" {
+		return id
+	}
+	return h.Get(LegacyDeviceIDHeader)
+}
 
 // Frame kinds.
 const (
