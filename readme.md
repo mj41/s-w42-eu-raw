@@ -62,7 +62,7 @@ go run ./cmd/fake-robot                    # simulated robot, in a second termin
 
 ## Deploy
 
-v0.1.0 (relay, pairing, telemetry, nod) runs at **https://chan.w42.eu**. Newer features are tested on the LAN first and are not released yet.
+v0.2.1 runs at **https://chan.w42.eu**, deployed 2026-10-02. New features are tested on the LAN first.
 
 1. **Release:** push a `v*` tag. `.github/workflows/release.yml` builds and pushes `ghcr.io/mj41/stackchan-server:<tag>`.
 2. **Deploy:** run the new image where you host it, pinned by digest.
