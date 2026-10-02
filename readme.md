@@ -60,20 +60,26 @@ go run ./cmd/fake-robot                    # simulated robot, in a second termin
 - Open the dashboard with the same host as the QR code (e.g. `http://192.168.1.10:8765/`, not `localhost`). The pairing cookie belongs to that host.
 - Run `go test -race ./...` for the tests.
 
-## Deploy
+## Running in a container
 
-v0.2.1 runs at **https://chan.w42.eu**, deployed 2026-10-02. New features are tested on the LAN first.
+A public instance runs at **https://chan.w42.eu**. To run your own:
 
-1. **Release:** push a `v*` tag. `.github/workflows/release.yml` builds and pushes `ghcr.io/mj41/stackchan-server:<tag>`.
-2. **Deploy:** run the new image where you host it, pinned by digest.
-3. **Robot token:** keep it in your host's secret store, never in git.
+1. **Image:** pushing a `v*` tag builds `ghcr.io/mj41/stackchan-server:<tag>`
+   (`.github/workflows/release.yml`). Pin it by digest where you deploy it.
+2. **Robot token:** mount the robot token file at `/secrets/robot-token` (keep it out of
+   git), and pass `-public-url https://<your host>`.
 
-Constraints:
+What any host needs:
 
-- **One replica:** state is in memory, so the Deployment uses one replica with `Recreate`. The image disables the state file (`-state-file ""`) because the root file system is read-only; a pod restart forgets pairings until a volume is mounted for it.
-- **No request timeout** on the proxy in front, so it never cuts the robot WebSocket, the browser SSE, or the media sockets.
-- **TLS:** it ends at the gateway, so `-public-url https://…` also makes the session cookie `Secure`.
-- **Audio bandwidth:** microphone audio is raw PCM (about 48 KB/s). Compress it before offering audio through the cloud.
+- **One instance:** state is in memory, so run exactly one, and stop the old one before
+  the new one starts. The image disables the state file (`-state-file ""`), so a restart
+  forgets pairings unless you mount a volume and pass `-state-file /state/state.json`.
+- **No request timeout** on the proxy in front of it: robot WebSockets, the browser's
+  event stream and the media sockets stay open for hours.
+- **TLS** may end at the proxy: `-public-url https://…` also makes the session cookie
+  `Secure`.
+- **Audio bandwidth:** microphone audio is raw PCM (about 48 KB/s). Compress it before
+  offering audio over the internet.
 
 ## Protocol
 
