@@ -140,6 +140,7 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 | `proximity` | `{"on": bool}`: the proximity sensor, whose IR LED next to the camera pulses ~10×/s. Off stops the LED and the approach events; light and auto-brightness keep working. Telemetry `proximity_on` |
 | `power_led` | `{"mode": "on\|off\|blink\|fast\|charging"}`: the red power LED; `charging` hands it back to the charger |
 | `nfc` | `{"on": bool}`: NFC tag polling, on by default. Listed only when the robot found its reader |
+| `car_enable` | `{"on": bool, "board"?: "v1\|v2\|both"}`: the optional TPBot car over BLE (firmware `CONFIG_STACKCHAN_EMBODY_CAR`). Off by default and kept on the robot. While on, the robot registers again with the `car_*` commands and telemetry listed in sbot's readme ("Car capability", `~/work-stai/sbot`) plus `car_connected`, and sends `car_connected` / `car_disconnected` events. This dashboard has no car controls; sbot has |
 
 ### Binary messages
 
