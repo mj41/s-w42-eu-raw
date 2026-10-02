@@ -1,6 +1,6 @@
 // Command stackchan-server relays between Stack-chan robots and browsers.
 //
-// Robots connect to ws://<host>/api/workers/connect with a bearer token.
+// Robots connect to ws://<host>/api/devices/connect with a bearer token.
 // Browsers open http://<host>/ and pair by scanning the robot's QR code.
 // With -tls-listen, the same dashboard is also served over HTTPS (for the
 // microphone, which browsers allow only on secure pages).

@@ -85,7 +85,7 @@ What any host needs:
 
 This is the device wire protocol v1. Its reference specification is `docs/wire-protocol.md` in the `home-w42-eu` repo; the tables below are this server's view of it.
 
-**Connect:** `ws://<server>/api/workers/connect` with these headers:
+**Connect:** `ws://<server>/api/devices/connect` (firmware before 2026-10-02 uses `/api/workers/connect`, still served) with these headers:
 
 - `Authorization: Bearer <robot token>`
 - `X-Device-Id: <robot id>`: 1–64 of `[A-Za-z0-9._-]`. Firmware from before 2026-10-02 sends `X-Yolovm-Worker-Id` instead, which the server still accepts.

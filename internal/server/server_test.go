@@ -820,3 +820,29 @@ func TestLegacyDeviceIDHeader(t *testing.T) {
 		t.Errorf("both headers: DeviceID = %q, want the new one", got)
 	}
 }
+
+// Older firmware connects to the legacy path with the legacy header: it must still register.
+func TestLegacyConnectPath(t *testing.T) {
+	s := New(Config{RobotToken: "tok", PublicURL: "http://example", Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	h := http.Header{}
+	h.Set("Authorization", "Bearer tok")
+	h.Set(wire.LegacyDeviceIDHeader, "stackchan-old")
+	ws, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(ts.URL, "http")+wire.LegacyConnectPath, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	f, _ := wire.Marshal(wire.KindRegister, wire.Meta{}, wire.RegisterBody{Class: wire.ClassRobot})
+	ws.WriteMessage(websocket.TextMessage, f)
+	ws.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, data, err := ws.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	frames, _ := wire.Parse(data)
+	if len(frames) == 0 || frames[0].Kind != wire.KindAccepted {
+		t.Fatalf("legacy robot got %s", data)
+	}
+}

@@ -18,8 +18,11 @@ import (
 
 // Connection handshake (wire protocol §1).
 const (
-	ConnectPath    = "/api/workers/connect"
-	DeviceIDHeader = "X-Device-Id"
+	ConnectPath = "/api/devices/connect"
+	// LegacyConnectPath is where firmware before 2026-10-02 connects. Servers still
+	// serve it next to ConnectPath; clients use ConnectPath. Removed in protocol v2.
+	LegacyConnectPath = "/api/workers/connect"
+	DeviceIDHeader    = "X-Device-Id"
 	// LegacyDeviceIDHeader is what firmware before 2026-10-02 sends. Servers still
 	// accept it (DeviceID); clients send DeviceIDHeader. Removed in protocol v2.
 	LegacyDeviceIDHeader = "X-Yolovm-Worker-Id"

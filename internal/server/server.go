@@ -148,6 +148,7 @@ func New(cfg Config) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+wire.ConnectPath, s.handleRobotConnect)
+	mux.HandleFunc("GET "+wire.LegacyConnectPath, s.handleRobotConnect) // firmware before 2026-10-02
 	mux.HandleFunc("GET /{$}", s.handleIndex)
 	mux.HandleFunc("GET /pair", s.handlePair)
 	mux.HandleFunc("GET /api/robots", s.handleListRobots)
