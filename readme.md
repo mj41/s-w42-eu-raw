@@ -6,7 +6,7 @@ Relay between M5Stack Stack-chan robots and web browsers for **Embody Mode**. It
 - **Browser:** scans the robot's QR code to pair, then gets a live dashboard.
 - **Server:** one Go binary with the web page built in. State lives in memory and is saved to a JSON file, so pairings survive a restart.
 
-The robot side is the Embody Mode app in the StackChan firmware fork (`firmware/main/apps/app_embody_mode/`, branch `mj-remote`). Workspace notes and the trust design live in `~/work-stai/stackchan-mj` (`AGENTS.md`, `docs/design.md`).
+The robot side is the Embody Mode app in the StackChan firmware fork (`firmware/main/apps/app_embody_mode/`, branch `mj-remote`). Workspace notes and the trust design live in `../stackchan-mj` (`AGENTS.md`, `docs/design.md`).
 
 ## Dashboard
 
@@ -140,7 +140,7 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 | `proximity` | `{"on": bool}`: the proximity sensor, whose IR LED next to the camera pulses ~10×/s. Off stops the LED and the approach events; light and auto-brightness keep working. Telemetry `proximity_on` |
 | `power_led` | `{"mode": "on\|off\|blink\|fast\|charging"}`: the red power LED; `charging` hands it back to the charger |
 | `nfc` | `{"on": bool}`: NFC tag polling, on by default. Listed only when the robot found its reader |
-| `car_enable` | `{"on": bool, "board"?: "v1\|v2\|both"}`: the optional TPBot car over BLE (firmware `CONFIG_STACKCHAN_EMBODY_CAR`). Off by default and kept on the robot. While on, the robot registers again with the `car_*` commands and telemetry listed in sbot's readme ("Car capability", `~/work-stai/sbot`) plus `car_connected`, and sends `car_connected` / `car_disconnected` events. This dashboard has no car controls; sbot has |
+| `car_enable` | `{"on": bool, "board"?: "v1\|v2\|both"}`: the optional TPBot car over BLE (firmware `CONFIG_STACKCHAN_EMBODY_CAR`). Off by default and kept on the robot. While on, the robot registers again with the `car_*` commands and telemetry listed in sbot's readme ("Car capability", `../sbot`) plus `car_connected`, and sends `car_connected` / `car_disconnected` events. This dashboard has no car controls; sbot has |
 
 ### Binary messages
 
@@ -193,3 +193,7 @@ This is an early prototype, tested on real hardware on the LAN.
 ## Credits
 
 The dashboard's emoji are [Fluent Emoji](https://github.com/microsoft/fluentui-emoji) (Flat style) by Microsoft, MIT license; see [internal/server/ui/emoji/LICENSE](internal/server/ui/emoji/LICENSE).
+
+## License
+
+MIT, see [LICENSE](LICENSE). The bundled emoji are Microsoft's Fluent Emoji (MIT), see [internal/server/ui/emoji/LICENSE](internal/server/ui/emoji/LICENSE).

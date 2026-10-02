@@ -2,7 +2,7 @@
 
 Go relay server for Stack-chan Embody Mode. See [readme.md](readme.md) for how to run it and for the protocol.
 
-- Workspace notes for the whole Stack-chan effort (firmware, build and flash, design, prior work) are in `~/work-stai/stackchan-mj/AGENTS.md`. Read them first.
+- Workspace notes for the whole Stack-chan effort (firmware, build and flash, design, prior work) are in `../stackchan-mj/AGENTS.md`. Read them first.
 - Go only. Use the standard library, plus gorilla/websocket (same as stai-yolovm).
 - The wire protocol's reference is `docs/wire-protocol.md` in the `home-w42-eu` repo. Change the spec there first, then `wire/wire.go` and this readme.
 - The firmware must be able to parse frames with cJSON: flat JSON objects, one frame per message from the server to the robot.
