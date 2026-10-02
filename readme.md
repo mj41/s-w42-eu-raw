@@ -186,15 +186,10 @@ All endpoints need the session cookie of a browser that paired with the robot.
 
 ## Status
 
-This is an early prototype, tested on real hardware on the LAN.
-- **Auth:** one shared robot token per deployment.
-- **State:** in memory, plus a JSON snapshot (`-state-file`) for restarts. Pairing codes and live connections are not saved.
-- **Plan:** the next steps follow `stackchan-mj/docs/design.md`:
-  1. owner keys and signed config/grants
-  2. rendezvous at `chan.w42.eu`
-  3. our public apps on `appchan.w42.eu`
-  4. private apps on the owner's LAN server
-  5. per-device identity with the ESP32-S3 DS peripheral
+A prototype, in daily use with one robot on a home network since 2026-09-29. It is not
+yet safe on untrusted networks: one shared robot token, no per-person permissions, plain
+`ws://` on the LAN. The way to a v1, in stages with clear goals, is in
+[docs/roadmap.md](docs/roadmap.md).
 
 ## Credits
 
