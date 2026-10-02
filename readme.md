@@ -6,7 +6,7 @@ Relay between M5Stack Stack-chan robots and web browsers for **Embody Mode**. It
 - **Browser:** scans the robot's QR code to pair, then gets a live dashboard.
 - **Server:** one Go binary with the web page built in. State lives in memory and is saved to a JSON file, so pairings survive a restart.
 
-The robot side is the Embody Mode app in the StackChan firmware fork (`firmware/main/apps/app_embody_mode/`, branch `mj-remote`). Workspace notes and the trust design live in `../stackchan-mj` (`AGENTS.md`, `docs/design.md`).
+The robot side is the Embody Mode app in the StackChan firmware fork `mj41/StackChan` (branch `mj-remote`, `firmware/main/apps/app_embody_mode/`).
 
 ## Dashboard
 
