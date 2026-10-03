@@ -111,16 +111,23 @@ func EnrollMAC(p []byte, r, b *ecdh.PublicKey) []byte {
 
 // CheckEnroll verifies an enrollment MAC (base64url) against any of the pairing secrets.
 func CheckEnroll(secrets [][]byte, r, b *ecdh.PublicKey, mac string) error {
+	_, err := MatchEnroll(secrets, r, b, mac)
+	return err
+}
+
+// MatchEnroll is CheckEnroll that also tells which secret matched, so the robot can consume
+// exactly that one (each secret enrolls one browser) and keep the others valid.
+func MatchEnroll(secrets [][]byte, r, b *ecdh.PublicKey, mac string) (int, error) {
 	got, err := b64.DecodeString(mac)
 	if err != nil {
-		return ErrBadMAC
+		return -1, ErrBadMAC
 	}
-	for _, p := range secrets {
+	for i, p := range secrets {
 		if p != nil && hmac.Equal(got, EnrollMAC(p, r, b)) {
-			return nil
+			return i, nil
 		}
 	}
-	return ErrBadMAC
+	return -1, ErrBadMAC
 }
 
 // Pairwise derives K_B from one side's private key and the other side's public key:

@@ -22,6 +22,21 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	s.servePage(w, r, "index.html")
 }
 
+// handleE2EScript (GET /e2e.js): the browser side of end-to-end encryption.
+func (s *Server) handleE2EScript(w http.ResponseWriter, r *http.Request) {
+	js, err := uiFS.ReadFile("ui/e2e.js")
+	if s.cfg.UIDir != "" {
+		js, err = os.ReadFile(filepath.Join(s.cfg.UIDir, "e2e.js"))
+	}
+	if err != nil {
+		http.Error(w, "ui missing", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Write(js)
+}
+
 // handleFleetPage (GET /robots): sign in, your robots, adding one.
 func (s *Server) handleFleetPage(w http.ResponseWriter, r *http.Request) {
 	s.servePage(w, r, "robots.html")

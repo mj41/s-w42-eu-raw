@@ -117,7 +117,40 @@
     your robot here? <a href="/robots">add it</a>
   </footer>
 </main>
+<script src="/e2e.js"></script>
 <script>
+// End-to-end encryption (e2e.js; home-w42-eu docs/e2ee.md). A pairing redirect may carry the
+// robot's key and pairing secret in the fragment, which the server never saw.
+const pairedParam = new URLSearchParams(location.search).get("paired");
+if (pairedParam && location.hash.startsWith("#e2e=")) E2E.takeFragment(pairedParam);
+
+// e2eAttach makes a media socket speak to an encrypted robot: 0x30 messages are opened and
+// passed on as the plaintext message they carry; speaker audio (0x03) goes sealed as 0x31.
+function e2eAttach(ws, robotId) {
+  let handler = null;
+  Object.defineProperty(ws, "onmessage", { get: () => handler, set: (fn) => { handler = fn; } });
+  ws.addEventListener("message", async (ev) => {
+    if (!handler) return;
+    const u8 = new Uint8Array(ev.data);
+    if (u8[0] === 0x30) {
+      const inner = await E2E.openBinary(robotId, u8);
+      if (inner) handler({ data: inner.buffer.slice(inner.byteOffset, inner.byteOffset + inner.byteLength) });
+      return;
+    }
+    handler(ev);
+  });
+  const send = ws.send.bind(ws);
+  ws.send = (data) => {
+    const c = cards.get(robotId);
+    const binary = data instanceof ArrayBuffer || ArrayBuffer.isView(data);
+    if (binary && c && c.robot && c.robot.e2e && E2E.known(robotId)) {
+      const u8 = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+      E2E.sealBinary(robotId, u8).then(send).catch(() => {});
+      return;
+    }
+    send(data);
+  };
+}
 "use strict";
 const list = document.getElementById("robots");
 const empty = document.getElementById("empty");
@@ -242,6 +275,14 @@ function ago(iso) {
 }
 
 async function sendCommand(id, command, args) {
+  const c = cards.get(id);
+  if (c && c.robot && c.robot.e2e) {
+    if (["camera", "mic", "imu_stream", "touch_stream", "light_stream"].includes(command)) {
+      // stream switches stay with the relay (it turns them on while someone watches)
+    } else {
+      return E2E.sendCommand(id, command, args);
+    }
+  }
   const res = await fetch("/api/robots/" + encodeURIComponent(id) + "/command", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -334,6 +375,7 @@ function makeCard(r) {
       imu.samples = [];
       const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/robots/${encodeURIComponent(c.id)}/media?imu=1`);
       ws.binaryType = "arraybuffer";
+      e2eAttach(ws, c.id);
       ws.onmessage = (ev) => {
         const dv = new DataView(ev.data);
         if (dv.getUint8(0) !== 0x05) return;
@@ -387,6 +429,7 @@ function makeCard(r) {
       if (tl.ws) { tl.ws.onclose = null; tl.ws.close(); tl.ws = null; btn.textContent = "Live touch"; canvas.hidden = true; txt.textContent = ""; return; }
       const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/robots/${encodeURIComponent(c.id)}/media?touch=1`);
       ws.binaryType = "arraybuffer";
+      e2eAttach(ws, c.id);
       ws.onmessage = (ev) => {
         const dv = new DataView(ev.data);
         if (dv.getUint8(0) !== 0x06) return;
@@ -431,6 +474,7 @@ function makeCard(r) {
       ls.samples = [];
       const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/robots/${encodeURIComponent(c.id)}/media?light=1`);
       ws.binaryType = "arraybuffer";
+      e2eAttach(ws, c.id);
       ws.onmessage = (ev) => {
         const dv = new DataView(ev.data);
         if (dv.getUint8(0) !== 0x08) return;
@@ -921,6 +965,7 @@ function makeCard(r) {
       const q = `video=${media.video ? 1 : 0}&audio=${media.audio ? 1 : 0}`;
       const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/robots/${encodeURIComponent(c.id)}/media?${q}`);
       ws.binaryType = "arraybuffer";
+      e2eAttach(ws, c.id);
       ws.onmessage = (ev) => {
         const u8 = new Uint8Array(ev.data);
         media.bytes += u8.length;
@@ -1324,9 +1369,27 @@ function upsert(r) {
     const ids = [...cards.keys()].sort();
     list.replaceChildren(...ids.map((id) => cards.get(id).root));
   }
+  if (r.e2e) {
+    r = { ...r, telemetry: { ...r.telemetry, ...E2E.telemetry(r.id) } };
+    E2E.noteRobot(r).catch((e) => console.warn("e2e:", e));
+  }
   c.robot = r;
   c.update(r);
+  e2eStatus(c, r);
   empty.hidden = cards.size > 0;
+}
+
+// e2eStatus shows whether this browser can read an encrypted robot.
+function e2eStatus(c, r) {
+  if (!c.e2eLine) {
+    c.e2eLine = el("p", { className: "muted" });
+    c.root.insertBefore(c.e2eLine, c.root.children[1] || null);
+  }
+  c.e2eLine.hidden = !r.e2e;
+  if (!r.e2e) return;
+  c.e2eLine.textContent = E2E.ready(r.id) ? "🔒 End-to-end encrypted: the server relays only ciphertext."
+    : E2E.known(r.id) ? "🔒 End-to-end encrypted: unlocking…"
+    : "🔒 This robot is end-to-end encrypted: scan the QR code on its screen with this browser to see it.";
 }
 
 // Join requests (see server join.go): an unpaired browser asks, a paired one answers.
@@ -1405,6 +1468,24 @@ function connect() {
     if (pending) {
       pendingPings.delete(p.id);
       pending.resolve({ ...p, total: performance.now() - pending.t0 });
+    }
+  });
+  es.addEventListener("e2e", async (ev) => {
+    const e = JSON.parse(ev.data);
+    let f;
+    try { f = await E2E.onEvent(e); } catch (err) { console.warn("e2e:", err); return; }
+    const c = cards.get(e.robot);
+    if (!f || !c) return;
+    if (f.kind === "E2EGroupKey" || f.kind === "RobotTelemetry") {
+      if (c.robot) upsert(c.robot);
+    } else if (f.kind === "RobotEvent") {
+      c.addEvent({ robot: e.robot, name: f.body.name, data: f.body.data, ts: new Date().toISOString(), seq: Date.now() });
+    } else if (f.kind === "RobotPong") {
+      const pending = pendingPings.get(f.body.id);
+      if (pending) {
+        pendingPings.delete(f.body.id);
+        pending.resolve({ ...f.body, total: performance.now() - pending.t0 });
+      }
     }
   });
   es.addEventListener("robot_event", (ev) => {

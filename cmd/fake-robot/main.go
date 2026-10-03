@@ -40,6 +40,8 @@ func main() {
 		tokenFile = flag.String("token-file", defaultTokenFile(), "file with the robot bearer token")
 		interval  = flag.Duration("telemetry", 2*time.Second, "telemetry interval")
 		events    = flag.Duration("events", 20*time.Second, "interval of fake robot events (0 disables)")
+		e2eOn     = flag.Bool("e2e", false, "end-to-end encryption (home-w42-eu docs/e2ee.md): seal everything for enrolled browsers")
+		e2eState  = flag.String("e2e-state", "", "file for the robot key and enrolled browsers (default ~/.config/stackchan-server/<id>-e2e.json)")
 	)
 	flag.Parse()
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -53,6 +55,18 @@ func main() {
 	url := strings.TrimRight(*serverURL, "/") + wire.ConnectPath
 
 	r := &robot{started: time.Now(), battery: 87, pitch: 45, brightness: 60, volume: 50, nfcOn: true, log: log}
+	if *e2eOn {
+		path := *e2eState
+		if path == "" {
+			home, _ := os.UserHomeDir()
+			path = filepath.Join(home, ".config", "stackchan-server", *id+"-e2e.json")
+		}
+		if r.e2e, err = newE2ERobot(*id, path, log); err != nil {
+			log.Error("e2e state", "file", path, "err", err)
+			os.Exit(1)
+		}
+		log.Info("end-to-end encryption on", "state", path, "epoch", r.e2e.epoch, "enrolled", len(r.e2e.enrolled))
+	}
 	// Reconnect with exponential backoff 1 s -> 30 s.
 	backoff := time.Second
 	for {
@@ -89,11 +103,14 @@ type robot struct {
 	frame               int     // camera frames sent, drives the test pattern
 	phase               float64 // microphone tone phase
 	log                 *slog.Logger
+	e2e                 *e2eRobot // nil: plaintext
 }
 
 type received struct {
-	cmd wire.RobotCommandBody
-	at  time.Time
+	cmd     wire.RobotCommandBody
+	at      time.Time
+	e2eKind string          // an E2E frame from a browser, instead of cmd
+	e2eBody json.RawMessage // its body
 }
 
 func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) error {
@@ -109,12 +126,27 @@ func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) e
 	}
 	defer ws.Close()
 
-	send := func(kind string, body any) error {
+	plainSend := func(kind string, body any) error {
 		f, err := wire.Marshal(kind, wire.Meta{}, body)
 		if err != nil {
 			return err
 		}
 		return ws.WriteMessage(websocket.TextMessage, f)
+	}
+	// With e2e, what the robot reports goes sealed under the group key.
+	send := plainSend
+	if r.e2e != nil {
+		send = func(kind string, body any) error {
+			switch kind {
+			case wire.KindRobotTelemetry, wire.KindRobotEvent, wire.KindRobotPong:
+				s, err := r.e2e.sealFrame(kind, body)
+				if err != nil {
+					return err
+				}
+				return plainSend(wire.KindE2EData, s)
+			}
+			return plainSend(kind, body)
+		}
 	}
 
 	reg := wire.RegisterBody{
@@ -126,6 +158,9 @@ func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) e
 			Measurements: []string{"battery_pct", "charging", "head_yaw_deg", "head_pitch_deg",
 				"wifi_rssi_dbm", "free_heap_kb", "uptime_s", "brightness_pct", "volume_pct", "screensaver"},
 		},
+	}
+	if r.e2e != nil {
+		reg.Labels = map[string]string{"e2e": "1"}
 	}
 	if err := send(wire.KindRegister, reg); err != nil {
 		return err
@@ -143,7 +178,7 @@ func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) e
 	// gorilla allows one concurrent writer: the reader hands commands to this loop.
 	errc := make(chan error, 1)
 	cmds := make(chan received, 16)
-	go func() { errc <- readLoop(ws, cmds, r.log) }()
+	go func() { errc <- readLoop(ws, cmds, r.log, r.e2e) }()
 
 	telemetry := time.NewTicker(interval)
 	defer telemetry.Stop()
@@ -160,7 +195,16 @@ func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) e
 	defer videoTick.Stop()
 	audioTick := time.NewTicker(40 * time.Millisecond) // 40 ms PCM chunks
 	defer audioTick.Stop()
-	sendBinary := func(msg []byte) error { return ws.WriteMessage(websocket.BinaryMessage, msg) }
+	sendBinary := func(msg []byte) error {
+		if r.e2e != nil {
+			sealed, err := r.e2e.sealBinary(msg)
+			if err != nil {
+				return err
+			}
+			msg = sealed
+		}
+		return ws.WriteMessage(websocket.BinaryMessage, msg)
+	}
 
 	for {
 		var err error
@@ -168,6 +212,36 @@ func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) e
 		case err = <-errc:
 			return err
 		case c := <-cmds:
+			if c.e2eKind != "" {
+				switch c.e2eKind {
+				case wire.KindE2EEnroll, wire.KindE2EHello:
+					var f wire.Frame
+					if c.e2eKind == wire.KindE2EEnroll {
+						f, err = r.e2e.handleEnroll(c.e2eBody)
+					} else {
+						f, err = r.e2e.handleHello(c.e2eBody)
+					}
+					if err != nil {
+						r.log.Warn("e2e "+c.e2eKind+" refused", "err", err)
+						err = nil
+						break
+					}
+					err = plainSend(f.Kind, f.Body)
+				case wire.KindE2ECommand:
+					cmd, oerr := r.e2e.openCommand(c.e2eBody)
+					if oerr != nil {
+						r.log.Warn("sealed command refused", "err", oerr)
+						break
+					}
+					c.cmd, c.e2eKind = cmd, ""
+				}
+				if c.e2eKind != "" || err != nil {
+					break
+				}
+			} else if r.e2e != nil && !relaySwitches[c.cmd.Command] {
+				r.log.Warn("plaintext command refused (e2e on)", "command", c.cmd.Command)
+				break
+			}
 			if c.cmd.Command == "snapshot" { // the test pattern as the "full resolution" still
 				frame := r.cameraFrame()
 				frame[0] = wire.BinSnapshot
@@ -291,7 +365,7 @@ func (r *robot) telemetry() map[string]float64 {
 	}
 }
 
-func readLoop(ws *websocket.Conn, cmds chan<- received, log *slog.Logger) error {
+func readLoop(ws *websocket.Conn, cmds chan<- received, log *slog.Logger, e *e2eRobot) error {
 	var speakerSec float64 // speaker audio received since the last log line
 	for {
 		kind, data, err := ws.ReadMessage()
@@ -331,6 +405,9 @@ func readLoop(ws *websocket.Conn, cmds chan<- received, log *slog.Logger) error 
 			case wire.KindPairCode:
 				var b wire.PairCodeBody
 				f.Decode(&b)
+				if e != nil {
+					b.URL = e.qrURL(b.URL) // the robot adds the fragment; the server never sees it
+				}
 				log.Info("pair by opening this URL (the robot would show it as a QR)", "url", b.URL, "expires_in_s", b.ExpiresInS)
 			case wire.KindPaired:
 				var b wire.PairedBody
@@ -340,6 +417,10 @@ func readLoop(ws *websocket.Conn, cmds chan<- received, log *slog.Logger) error 
 				var b wire.RobotCommandBody
 				f.Decode(&b)
 				cmds <- received{cmd: b, at: at}
+			case wire.KindE2EEnroll, wire.KindE2EHello, wire.KindE2ECommand:
+				if e != nil {
+					cmds <- received{e2eKind: f.Kind, e2eBody: f.Body, at: at}
+				}
 			default:
 				log.Debug("ignoring frame", "kind", f.Kind)
 			}

@@ -24,7 +24,7 @@ import (
 	"github.com/mj41/stackchan-server/wire"
 )
 
-//go:embed ui/index.html ui/robots.html ui/emoji
+//go:embed ui/index.html ui/robots.html ui/e2e.js ui/emoji
 var uiFS embed.FS
 
 // Config configures a Server.
@@ -122,6 +122,7 @@ type robotView struct {
 	Model       string             `json:"model,omitempty"`
 	Firmware    string             `json:"firmware,omitempty"`
 	Commands    []string           `json:"commands"`
+	E2E         bool               `json:"e2e"` // the robot seals its traffic for enrolled browsers (Register label e2e=1)
 	Telemetry   map[string]float64 `json:"telemetry"`
 	TelemetryAt *time.Time         `json:"telemetry_at,omitempty"`
 	// Set while the robot is offline because of the standby command.
@@ -194,6 +195,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/robots", s.handleListRobots)
 	mux.HandleFunc("GET /api/info", s.handleInfo)
 	mux.HandleFunc("GET /robots", s.handleFleetPage)
+	mux.HandleFunc("GET /e2e.js", s.handleE2EScript)
 	mux.HandleFunc("GET /auth/login", s.handleLogin)
 	mux.HandleFunc("GET /auth/callback", s.handleAuthCallback)
 	mux.HandleFunc("POST /auth/logout", s.handleLogout)
@@ -310,6 +312,7 @@ func (s *Server) view(st *robotState) robotView {
 		Model:     st.caps.Model,
 		Firmware:  st.caps.Firmware,
 		Commands:  slices.Clone(st.caps.Commands),
+		E2E:       st.labels["e2e"] == "1",
 		Telemetry: make(map[string]float64, len(st.telemetry)),
 		LastSeen:  st.lastSeen,
 	}
