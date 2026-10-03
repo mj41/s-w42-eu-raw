@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/mj41/stackchan-server/e2e"
 	"github.com/mj41/stackchan-server/wire"
 )
 
@@ -55,6 +56,10 @@ func (s *Server) relayMedia(robotID string, msg []byte) {
 		return
 	}
 	kind := msg[0]
+	if kind == e2e.BinGroup {
+		s.relayE2EBinary(robotID, msg)
+		return
+	}
 	if kind == wire.BinSnapshot {
 		s.storeSnapshot(robotID, msg[1:])
 		return
@@ -184,6 +189,10 @@ func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
 			kind, msg, err := ws.ReadMessage()
 			if err != nil {
 				return
+			}
+			if kind == websocket.BinaryMessage && len(msg) > 0 && msg[0] == e2e.BinBrowser {
+				s.forwardE2EBinary(id, msg) // sealed speaker audio
+				continue
 			}
 			if kind != websocket.BinaryMessage || len(msg) < 4 || msg[0] != wire.BinSpeakerPCM {
 				continue

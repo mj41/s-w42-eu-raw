@@ -286,6 +286,8 @@ func (s *Server) handleRobotFrame(c *robotConn, f wire.Frame) {
 			return
 		}
 		s.setTelemetry(c.id, body.Measurements)
+	case wire.KindE2EGroupKey, wire.KindE2EData:
+		s.relayE2E(c.id, f) // sealed: relayed, never read (e2erelay.go)
 	default:
 		// Unknown kinds are ignored for forward compatibility.
 		s.log.Debug("ignoring frame", "robot", c.id, "kind", f.Kind)

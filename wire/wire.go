@@ -43,7 +43,28 @@ const (
 	KindPaired       = "Paired"
 	KindRobotCommand = "RobotCommand"
 	KindServerOffer  = "ServerOffer"
+
+	// End-to-end encrypted (home-w42-eu docs/e2ee.md; package e2e). The server only relays
+	// them: browser -> robot E2EEnroll, E2EHello, E2ECommand; robot -> browsers E2EGroupKey,
+	// E2EData. Binary 0x30 (robot -> browsers) and 0x31 (browser -> robot) likewise.
+	KindE2EEnroll   = "E2EEnroll"
+	KindE2EHello    = "E2EHello"
+	KindE2ECommand  = "E2ECommand"
+	KindE2EGroupKey = "E2EGroupKey"
+	KindE2EData     = "E2EData"
 )
+
+// E2EEnrollBody is a browser's request to be enrolled: its key and the MAC that proves it
+// read the robot's QR code. Field names follow docs/e2ee.md.
+type E2EEnrollBody struct {
+	B   string `json:"b"`   // the browser's X25519 public key, base64url
+	MAC string `json:"mac"` // HMAC-SHA256(P, ...), base64url
+}
+
+// E2EHelloBody: a returning browser asks for the current group key.
+type E2EHelloBody struct {
+	B string `json:"b"` // browser id
+}
 
 // ServerOfferBody lists other servers this server lets its robots switch to
 // (voluntary): the robot adds them to its server list. Token is the robot
