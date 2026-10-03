@@ -6,7 +6,7 @@ Relay between M5Stack Stackchan robots and web browsers for **Embody Mode**. It 
 - **Browser:** scans the robot's QR code to pair, then gets a live dashboard.
 - **Server:** one Go binary with the web page built in. State lives in memory and is saved to a JSON file, so pairings survive a restart.
 
-The robot side is the [Embody Mode app](https://github.com/mj41/StackChan/tree/embody-mj41/firmware/main/apps/app_embody_mode) in the StackChan firmware fork [mj41/StackChan](https://github.com/mj41/StackChan/tree/embody-mj41) (branch `embody-mj41`). Setting up a robot with this server, from building the firmware to pairing a phone: [SETUP.md](https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/SETUP.md).
+The robot side is the [Embody Mode app](https://github.com/mj41/StackChan/tree/embody-mj41/firmware/main/apps/app_embody_mode) in the StackChan firmware fork [mj41/StackChan](https://github.com/mj41/StackChan/tree/embody-mj41) (branch `embody-mj41`). **Setting up a robot:** plug it in and press one button on [chan.w42.eu/setup](https://chan.w42.eu/setup) in Chrome ([below](#set-a-robot-up-over-usb)); with your own server or your own firmware build: [SETUP.md](https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/SETUP.md).
 
 Part of [home-w42-eu](https://github.com/mj41/home-w42-eu), a local first, privacy first platform for a home: this repo holds the Go implementation of its device wire protocol (the `wire` package), which the other servers use too.
 
@@ -69,6 +69,7 @@ go run ./cmd/fake-robot                    # simulated robot, in a second termin
 - `-trusted-proxies 1` behind one reverse proxy that appends the client address to `X-Forwarded-For` (Envoy, nginx with `$proxy_add_x_forwarded_for`). The default 0 ignores that header, because clients can forge it. Limits and logs use the address.
 - **Limits:** 20 failed logins per address and robot id in 10 minutes, then HTTP 429 for that robot from that address, right token included (other robots behind the same address keep working); 20 wrong pairing codes per address in 10 minutes, then 429. Invited robots may send 300 messages/s and 512 KB/s on average (bursts of 1000 messages and 4 MB), and are disconnected above that; the owner's robots are not limited. Browsers: at most 8 open event streams per session and 30 per address, 4 media sockets per session and robot and 20 per address, and 20 commands, pictures or uploads per second per session (bursts of 60); above that HTTP 429.
 - `-no-address-limits` turns the per-address limits off, for a server that cannot see client addresses (behind a TCP load balancer without the PROXY protocol, every client has the balancer's address, and one stranger's failures would lock everybody out). The send budgets for invited robots stay.
+- `-firmware-dir <dir>` serves the released Embody Mode firmware (`manifest.json` and its parts) for the setup page `/setup` (see "Set a robot up over USB" below). Without it, `/setup` can only set up robots that already have Embody Mode.
 - `-ui-dir internal/server/ui` serves the dashboard from disk on every request (development). UI edits then need only a page reload.
 - Open the dashboard with the same host as the QR code (e.g. `http://192.168.1.10:8765/`, not `localhost`). The pairing cookie belongs to that host.
 - Run `go test -race ./...` for the tests.
@@ -129,6 +130,53 @@ token>`) goes into the file you pass as `-robot-tokens-file`; the file holds no 
 - Invited robots have send limits (above, "Limits").
 - Still to do (see the [roadmap](docs/roadmap.md)): end-to-end encryption through a public
   server.
+
+## Set a robot up over USB
+
+No firmware build and no token in the firmware: the robot keeps its server list, token and
+Wi-Fi in its settings, and a computer writes them over the USB cable. Having the robot on the
+cable is the proof of ownership, like scanning its QR code.
+
+**In Chrome or Edge: `/setup`** (e.g. [chan.w42.eu/setup](https://chan.w42.eu/setup)).
+Plug the robot in (the USB-C port on its head, a data cable), sign in, press **Set up my
+robot** and pick the "USB JTAG/serial debug unit". The page then:
+
+1. installs the released Embody Mode firmware (Web Serial and
+   [esptool-js](https://github.com/espressif/esptool-js), checked against the SHA-256 in the
+   manifest; the robot's settings stay),
+2. reads the robot id over the cable and adds the robot to your account with a new token,
+3. writes this server, the token and, if you give it, your Wi-Fi into the robot, sets
+   autostart, and restarts it into Embody Mode,
+4. after which the robot connects. It is private to you: open the dashboard on this server,
+   signed in, and it is there (or scan the QR code on its screen with a signed-in phone).
+
+**Options** on the same page: Wi-Fi (sent only to the robot, never to the server), keep the
+robot's firmware or flash your own merged image (`./container.sh release` in the firmware makes
+one), and your own server (its URL and robot token) instead of this one, which works without
+sign-in too, e.g. `http://localhost:8765/setup` for a server on your laptop.
+
+**From a terminal: `stackchan-usb`**, the same over USB for developers and scripts (the robot
+must already have firmware with USB setup):
+
+```bash
+go run ./cmd/stackchan-usb hello        # the robot id, firmware and protocol
+go run ./cmd/stackchan-usb provision -url ws://192.168.1.10:8765 -name home \
+  -token-file ~/.config/stackchan-server/robot-token -default -autostart
+go run ./cmd/stackchan-usb provision -wifi-ssid Home -wifi-password-file wifi.txt
+go run ./cmd/stackchan-usb restart      # into Embody Mode
+```
+
+- It finds the robot by its USB vendor (Espressif, 0x303A); `-port /dev/ttyACM1` picks another.
+- Secrets come from files, never from the command line.
+- `-autostart` needs firmware built with automation (the release build has it).
+- The protocol: lines `@stackchan <JSON>` on the USB serial port, described in the firmware's
+  [usb_setup.h](https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/usb_setup.h).
+
+**Serving the firmware.** `/setup` installs what `-firmware-dir` holds: the `dist` directory
+of `./container.sh release`, or the files of an `embody-v*` release of
+[mj41/StackChan](https://github.com/mj41/StackChan/releases) (built by CI). The release build
+has no server and no token inside; until it is set up, the robot's Embody Mode shows "Set up:
+chan.w42.eu/setup".
 
 ## Running in a container
 

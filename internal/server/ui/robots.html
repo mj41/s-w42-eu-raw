@@ -60,12 +60,14 @@
   <nav>
     <a href="/">Dashboard</a>
     <a href="/robots" class="here">Your robots</a>
+    <a href="/setup">Set up</a>
     <span class="acct" id="acct"></span>
   </nav>
 
   <h1>Your robots</h1>
-  <p class="sub">Add your Stackchan to this server: sign in, add its id, and put the token you
-  get into its firmware.</p>
+  <p class="sub">The easiest way to add your Stackchan: plug it in and press one button on
+  <a href="/setup">Set up</a> (Chrome or Edge). Or add its id here and give the robot the
+  token yourself.</p>
 
   <section class="card" id="signin" hidden>
     <h2>Sign in</h2>
@@ -91,6 +93,8 @@
     <h2>Token for <span id="tokenrobot"></span></h2>
     <p class="warn">Shown only now. Copy it before you leave this page; if you lose it, get a new one
     (the old one stops working).</p>
+    <p class="muted">No need to build anything: <a href="/setup">Set up</a> writes a token into the
+    robot over USB by itself. For your own firmware build:</p>
     <ol>
       <li>Put these two lines into <code>firmware/sdkconfig.defaults.local</code> and, if the
       robot was built before, the same lines into <code>firmware/sdkconfig</code>:
@@ -98,7 +102,9 @@
         <button class="soft small" id="copy">Copy</button>
       </li>
       <li>Build and flash (<a href="https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/SETUP.md">SETUP.md</a>,
-      steps 4 and 5), then open Embody Mode on the robot.</li>
+      steps 4 and 5), then open Embody Mode on the robot. Or keep the firmware and write the
+      token over USB: <code>stackchan-usb provision -url &lt;this server&gt; -token-file &lt;file&gt; -default</code>
+      (<a href="https://github.com/mj41/stackchan-server#set-a-robot-up-over-usb">readme</a>).</li>
       <li>Scan the QR code on its screen with your phone to pair, or open
       <a href="/">the dashboard</a> here and type the code.</li>
     </ol>
