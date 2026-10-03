@@ -148,8 +148,11 @@ robot** and pick the "USB JTAG/serial debug unit". The page then:
    [esptool-js](https://github.com/espressif/esptool-js), checked against the SHA-256 in the
    manifest; the robot's settings stay),
 3. reads the robot id over the cable and adds the robot to your account with a new token,
-4. writes this server, the token and, if you give it, your Wi-Fi into the robot, sets
-   autostart, and restarts it into Embody Mode,
+4. writes this server, the token and, if you give it, your Wi-Fi into the robot, and restarts
+   it into Embody Mode. **Start Embody Mode when the robot turns on** (off by default) sets
+   autostart; **App** picks the server the robot starts with (pinned as its default): the
+   dashboard, or another app the server offers (`-offer`, e.g. Pet or Sbot), which the robot
+   also gets with their tokens,
 5. after which the robot connects. It is private to you: open the dashboard on this server,
    signed in, and it is there (or scan the QR code on its screen with a signed-in phone).
 
@@ -164,6 +167,7 @@ Server, "My own server"; chan.w42.eu/setup too):
 
 ```json
 {"server": {"name": "192.168.1.10:8765", "url": "ws://192.168.1.10:8765", "token": "…"},
+ "apps": [{"name": "Pet", "url": "ws://192.168.1.10:8770", "token": "…"}],
  "wifi": {"ssid": "Home", "password": "…"}}
 ```
 

@@ -108,8 +108,8 @@ func netshField(out, name string) string {
 	return ""
 }
 
-// POST /api/setup/local: the setup for a robot of this server, as the robot's provision
-// request takes it ({"server": {name, url, token}, "wifi": {ssid, password}}), for the setup
+// POST /api/setup/local: the setup for a robot of this server ({"server": {name, url, token},
+// "apps": [other servers it offers], "wifi": {ssid, password}}), for the setup
 // page on this server's computer only (localSetup): it fills the page, or is copied to set a
 // robot up from another computer. POST and same origin, so no other site's page can read it.
 func (s *Server) handleSetupLocal(w http.ResponseWriter, r *http.Request) {
@@ -127,6 +127,14 @@ func (s *Server) handleSetupLocal(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log.Info("setup for a robot handed to the page on this computer")
 	setup := map[string]any{"server": map[string]string{"name": name, "url": s.robotURL(), "token": s.cfg.RobotToken}}
+	// The other apps this server offers its robots (-offer), to pin one as the robot's start.
+	apps := []map[string]string{}
+	for _, o := range s.cfg.Offers {
+		apps = append(apps, map[string]string{"name": o.Name, "url": o.URL, "token": o.Token})
+	}
+	if len(apps) > 0 {
+		setup["apps"] = apps
+	}
 	if wifi := currentWifi(); wifi.SSID != "" {
 		setup["wifi"] = wifi
 	}

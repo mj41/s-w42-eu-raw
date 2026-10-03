@@ -36,6 +36,9 @@
   label { display: block; font-size: 0.9rem; color: var(--muted); }
   label.radio, label.check { display: flex; gap: 8px; align-items: flex-start; color: var(--text); margin: 6px 0; font-size: 0.95rem; }
   label.check { margin-left: 26px; color: var(--muted); }
+  .startrow { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 14px; }
+  .startrow label { display: flex; gap: 8px; align-items: center; color: var(--text); font-size: 0.95rem; }
+  select { font: inherit; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
   details summary { cursor: pointer; font-weight: 600; }
   .muted { color: var(--muted); font-size: 0.9rem; }
   ol.steps { margin: 0; padding-left: 22px; }
@@ -76,6 +79,10 @@
 
   <section class="card" id="go">
     <button class="big" id="start">Set up my robot</button>
+    <div class="startrow">
+      <label><input type="checkbox" id="autostart"> Start Embody Mode when the robot turns on</label>
+      <label id="appbox" hidden>App <select id="app"></select></label>
+    </div>
     <p id="summary" style="margin:10px 0 0"></p>
     <p class="muted" style="margin:10px 0 0">Chrome asks which device to use: choose the one named
     <b>USB JTAG/serial debug unit</b>. Setting up takes about two minutes (four with the backup);
@@ -168,7 +175,7 @@ for (const r of document.querySelectorAll("input[name=fw]")) r.onchange = () => 
   $("backupcheck").hidden = radio("fw") !== "latest";
   refresh();
 };
-for (const r of document.querySelectorAll("input[name=srv]")) r.onchange = () => { $("ownsrv").hidden = radio("srv") !== "own"; refresh(); };
+for (const r of document.querySelectorAll("input[name=srv]")) r.onchange = () => { $("ownsrv").hidden = radio("srv") !== "own"; refresh(); fillApps(); };
 
 let localSetup = null; // the server's setup, on the server's own computer (/api/setup/local)
 
@@ -192,7 +199,9 @@ function summarize() {
     server = typeof p === "string" ? "your server (paste its setup in Options)" : p.server.name;
   } else server = (me.robot_url ? $("host").textContent : location.host) + (localSetup ? " (this computer)" : ", your account");
   const ssid = $("ssid").value.trim();
+  const app = $("app").selectedOptions[0]?.textContent;
   const parts = [`Server: ${server}`, ssid ? `Wi-Fi: ${ssid}` : "Wi-Fi: set on the robot later",
+    ($("autostart").checked ? "Starts Embody Mode by itself" : "Embody Mode from the launcher") + (app && !$("appbox").hidden ? ` with ${app}` : ""),
     fw === "latest" ? `Firmware: official Embody Mode ${$("fwversion").textContent}` + ($("backup").checked ? " (backup first)" : "") : "Firmware: keep"];
   $("summary").replaceChildren(...parts.flatMap((t, i) => [i ? " · " : "", t]));
 }
@@ -225,6 +234,7 @@ async function loadMe() {
     $("ownsrv").hidden = false;
     $("options").open = true;
   }
+  fillApps();
   refresh();
 }
 
@@ -438,10 +448,31 @@ function parseSetup(text) {
   if (!token) return "Own server: the setup has no token.";
   const name = String(srv.name || "").trim() || new URL(url.replace(/^ws/, "http")).host;
   const wifi = v.wifi?.ssid ? { ssid: String(v.wifi.ssid), password: String(v.wifi.password || "") } : null;
-  return { server: { name, url, token }, wifi };
+  const apps = (Array.isArray(v.apps) ? v.apps : []).filter((a) => /^wss?:\/\/[^/]/.test(String(a?.url || "")))
+    .map((a) => ({ name: String(a.name || a.url), url: String(a.url), token: String(a.token || "") }));
+  return { server: { name, url, token }, apps, wifi };
 }
 
-for (const id of ["ssid", "setupjson", "backup"]) $(id).addEventListener("input", summarize);
+// The apps the robot can start with: the robot's server (its dashboard) and the other servers
+// it offers; the chosen one is pinned as the robot's default.
+function appChoices() {
+  if (radio("srv") === "own") {
+    const p = parseSetup($("setupjson").value);
+    return typeof p === "string" ? [] : [{ ...p.server, name: `Dashboard (${p.server.name})` }, ...p.apps];
+  }
+  if (localSetup && !me.signed_in) return [{ ...localSetup.server, name: `Dashboard (${localSetup.server.name})` }, ...(localSetup.apps || [])];
+  return me.robot_url ? [{ name: `Dashboard (${$("host").textContent})`, url: me.robot_url }] : [];
+}
+function fillApps() {
+  const apps = appChoices(), keep = $("app").value;
+  $("app").replaceChildren(...apps.map((a) => Object.assign(document.createElement("option"), { value: a.url, textContent: a.name })));
+  if (apps.some((a) => a.url === keep)) $("app").value = keep;
+  $("appbox").hidden = apps.length < 2;
+  summarize();
+}
+
+for (const id of ["ssid", "backup", "autostart", "app"]) $(id).addEventListener("input", summarize);
+$("setupjson").addEventListener("input", fillApps);
 $("copysetup").onclick = async () => {
   try {
     await navigator.clipboard.writeText(JSON.stringify(localSetup, null, 2));
@@ -564,7 +595,11 @@ $("start").onclick = async () => {
       server = { name: new URL(added.server_url.replace(/^ws/, "http")).host, url: added.server_url, token: added.token };
     }
     step(s++);
-    const req = { op: "provision", server, default: true, autostart: true };
+    const chosen = appChoices(), pin = $("app").value || server.url;
+    const req = { op: "provision", server, default: true, autostart: $("autostart").checked };
+    const others = chosen.filter((a) => a.url !== server.url && a.url);
+    if (others.length) req.servers = others.map(({ name, url, token }) => ({ name, url, token: token || "" }));
+    if (pin !== server.url) req.pin = pin;
     if (original) req.original = original;
     if ($("ssid").value.trim()) req.wifi = { ssid: $("ssid").value.trim(), password: $("wifipass").value };
     else if (pasted?.wifi?.ssid) req.wifi = pasted.wifi;
@@ -577,6 +612,10 @@ $("start").onclick = async () => {
       "Your robot restarts. If it does not know your Wi-Fi yet, it opens a hotspot: connect your phone to it and choose your network") +
       (me.signed_in && !own ? `, then to ${server.name}. It is private: open the dashboard here, signed in, to see it.`
         : `, then to ${server.name}: scan the QR code on its screen with your phone to pair.`);
+    // Open the pinned app: this server's dashboard, or the other server's page.
+    const pinned = chosen.find((a) => a.url === pin);
+    $("donelink").href = pin === server.url && !own ? "/" : pin.replace(/^ws/, "http");
+    $("donelink").textContent = pinned && pin !== server.url ? `Open ${pinned.name}` : "Open the dashboard";
     $("donelink").hidden = false;
     $("done").hidden = false;
     $("progressbox").hidden = true;
