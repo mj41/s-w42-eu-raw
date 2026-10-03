@@ -468,11 +468,13 @@ $("start").onclick = async () => {
   else {
     if (backup) names.push("Back up the current firmware");
     if (fw === "latest") names.push("Install the firmware");
-    names.push("Read the robot's id", own ? "Use your server" : "Add the robot to your account", "Write the settings", "Restart into Embody Mode");
+    names.push("Read the robot's id", own ? "Use your server" : localSetup && !me.signed_in ? "Use this server" : "Add the robot to your account", "Write the settings", "Restart into Embody Mode");
   }
   let port;
   try {
-    port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] });
+    // A robot this page may use already (chosen before): no need to ask again.
+    const known = (await navigator.serial.getPorts()).filter((p) => p.getInfo().usbVendorId === 0x303a);
+    port = known.length === 1 ? known[0] : await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] });
   } catch (e) {
     if (e.name !== "NotFoundError") { $("progressbox").hidden = false; $("steps").replaceChildren(); $("error").textContent = "Chrome could not open the USB device chooser: " + e.message; }
     return; // NotFoundError: the chooser was closed without a choice
