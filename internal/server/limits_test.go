@@ -1,6 +1,8 @@
 package server
 
 import (
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -30,7 +32,7 @@ func TestClientIP(t *testing.T) {
 }
 
 func TestFailLimiter(t *testing.T) {
-	l := newFailLimiter(3, time.Minute)
+	l := newFailLimiter(3, time.Minute, false)
 	now := time.Now()
 	for i := 0; i < 3; i++ {
 		if l.blocked("a", now) {
@@ -43,6 +45,12 @@ func TestFailLimiter(t *testing.T) {
 	}
 	if l.blocked("a", now.Add(time.Minute)) {
 		t.Fatal("still blocked after the window")
+	}
+	off := newFailLimiter(1, time.Minute, true)
+	off.fail("a", now)
+	off.fail("a", now)
+	if off.blocked("a", now) {
+		t.Fatal("a disabled limiter blocked")
 	}
 }
 
@@ -64,10 +72,23 @@ func TestRobotLoginsRateLimited(t *testing.T) {
 			t.Fatalf("attempt %d: HTTP %d, want 401", i, got)
 		}
 	}
-	// Blocked now, even with the right token: otherwise guessing would go on.
+	// Blocked now for this robot, even with the right token: otherwise guessing would go on.
 	if got := dialStatus(ts, testToken, "chan-1"); got != http.StatusTooManyRequests {
 		t.Fatalf("after the limit: HTTP %d, want 429", got)
 	}
+	// Other robots from the same address are not locked out.
+	connectRobot(t, ts, "chan-2", wire.ClassRobot)
+}
+
+func TestNoAddressLimits(t *testing.T) {
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := New(Config{RobotToken: testToken, PairTTL: time.Minute, Log: quiet, NoAddressLimits: true})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+	for i := 0; i < maxRobotAuthFails+5; i++ {
+		dialStatus(ts, "wrong", "chan-1")
+	}
+	connectRobot(t, ts, "chan-1", wire.ClassRobot)
 }
 
 func TestWrongPairCodesRateLimited(t *testing.T) {

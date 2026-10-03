@@ -32,6 +32,7 @@ type Config struct {
 	RobotToken      string               // shared bearer token robots must present
 	RobotTokensFile string               // optional per-robot invite tokens (see invites.go); "" disables
 	TrustedProxies  int                  // reverse proxies in front that append to X-Forwarded-For (see clientIP); 0 ignores it
+	NoAddressLimits bool                 // the server cannot see client addresses (e.g. behind a TCP load balancer): no per-address limits
 	PublicURL       string               // base URL browsers use, e.g. http://192.168.1.10:8765
 	PairTTL         time.Duration        // lifetime of a pairing code
 	UIDir           string               // development: serve index.html from this directory instead of the embedded copy
@@ -141,8 +142,8 @@ func New(cfg Config) *Server {
 		saveNow:  make(chan struct{}, 1),
 
 		joinLastByIP: map[string]time.Time{},
-		robotFails:   newFailLimiter(maxRobotAuthFails, failWindow),
-		pairFails:    newFailLimiter(maxPairFails, failWindow),
+		robotFails:   newFailLimiter(maxRobotAuthFails, failWindow, cfg.NoAddressLimits),
+		pairFails:    newFailLimiter(maxPairFails, failWindow, cfg.NoAddressLimits),
 	}
 	if cfg.RobotTokensFile != "" {
 		s.invites = newRobotInvites(cfg.RobotTokensFile)

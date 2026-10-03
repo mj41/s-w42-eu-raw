@@ -12,7 +12,7 @@ import (
 // codes per client address, and how much an invited (guest) robot may send.
 const (
 	failWindow        = 10 * time.Minute
-	maxRobotAuthFails = 20 // failed robot logins per address per window, then 429 for all
+	maxRobotAuthFails = 20 // failed robot logins per address and robot id per window, then 429
 	maxPairFails      = 20 // wrong pairing codes per address per window, then 429
 	maxTrackedAddrs   = 10000
 
@@ -25,21 +25,27 @@ const (
 	guestBurstMsgs   = 1000
 )
 
-// failLimiter counts failures per client address in a sliding window.
+// failLimiter counts failures per key (a client address) in a sliding window. Disabled,
+// it never blocks: when every client shows up with the same proxy address, a per-address
+// limit would lock everybody out at once.
 type failLimiter struct {
-	max    int
-	window time.Duration
+	max      int
+	window   time.Duration
+	disabled bool
 
 	mu    sync.Mutex
 	fails map[string][]time.Time
 }
 
-func newFailLimiter(max int, window time.Duration) *failLimiter {
-	return &failLimiter{max: max, window: window, fails: map[string][]time.Time{}}
+func newFailLimiter(max int, window time.Duration, disabled bool) *failLimiter {
+	return &failLimiter{max: max, window: window, disabled: disabled, fails: map[string][]time.Time{}}
 }
 
 // blocked reports whether addr has used up its failures in the window.
 func (l *failLimiter) blocked(addr string, now time.Time) bool {
+	if l.disabled {
+		return false
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return len(l.recent(addr, now)) >= l.max
@@ -47,6 +53,9 @@ func (l *failLimiter) blocked(addr string, now time.Time) bool {
 
 // fail records one failure for addr.
 func (l *failLimiter) fail(addr string, now time.Time) {
+	if l.disabled {
+		return
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if len(l.fails) >= maxTrackedAddrs {

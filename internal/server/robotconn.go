@@ -76,19 +76,22 @@ func (c *robotConn) queue(m outMsg) bool {
 
 func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 	ip, now := s.clientIP(r), time.Now()
-	if s.robotFails.blocked(ip, now) {
-		http.Error(w, "too many failed logins from this address, try again later", http.StatusTooManyRequests)
-		return
-	}
 	token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	id := wire.DeviceID(r.Header)
 	if !robotIDPattern.MatchString(id) {
 		http.Error(w, "missing or invalid "+wire.DeviceIDHeader, http.StatusBadRequest)
 		return
 	}
+	// Per address and robot id: guessing one robot's token gets blocked, other robots behind
+	// the same address (a home NAT) keep working.
+	failKey := ip + " " + id
+	if s.robotFails.blocked(failKey, now) {
+		http.Error(w, "too many failed logins for this robot from this address, try again later", http.StatusTooManyRequests)
+		return
+	}
 	ok, guest := s.robotAuth(id, token)
 	if !ok {
-		s.robotFails.fail(ip, now)
+		s.robotFails.fail(failKey, now)
 		s.log.Info("robot unauthorized", "robot", id, "remote", ip)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return

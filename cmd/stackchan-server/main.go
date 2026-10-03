@@ -49,6 +49,7 @@ func main() {
 		tlsKey    = flag.String("tls-key", defaultConfigFile("tls-key.pem"), "TLS key for -tls-listen")
 		invites   = flag.String("robot-tokens-file", "", "per-robot invite tokens: lines \"<robot id> <sha256 of its token>\", read again when changed (\"\" disables; see `stackchan-server invite`)")
 		proxies   = flag.Int("trusted-proxies", 0, "reverse proxies in front of this server that append the client address to X-Forwarded-For (1 behind one gateway); 0 ignores the header, which clients can forge")
+		noAddrLim = flag.Bool("no-address-limits", false, "turn off the per-address limits (failed logins, wrong pairing codes): for a server that cannot see client addresses, e.g. behind a TCP load balancer without the PROXY protocol, where every client would share one address")
 		offers    offerFlags
 	)
 	flag.Var(&offers, "offer", "offer robots another server: name=wss://host[,tokenfile] (repeatable; the token file holds that server's robot token)")
@@ -94,6 +95,7 @@ func main() {
 		StateFile:       *stateFile,
 		RobotTokensFile: *invites,
 		TrustedProxies:  *proxies,
+		NoAddressLimits: *noAddrLim,
 		HTTPSPort:       httpsPort,
 		Offers:          offers,
 		Log:             log,

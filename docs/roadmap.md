@@ -76,7 +76,8 @@ nothing else, and can read afterwards what was used.
   limits on every message, and short log retention on the public instance. *Started
   2026-10-03:* failed robot logins and wrong pairing codes are limited per address (with
   `-trusted-proxies` so a forged `X-Forwarded-For` cannot dodge it), and invited robots
-  have message and byte budgets.
+  have message and byte budgets. chan.w42.eu runs with `-no-address-limits` until its
+  load balancer passes client addresses (PROXY protocol).
 - **An external security review** of the protocol and the server.
 
 **Done when:** the public instance can be offered to people we do not know without
