@@ -78,7 +78,8 @@
     <button class="big" id="start">Set up my robot</button>
     <p id="summary" style="margin:10px 0 0"></p>
     <p class="muted" style="margin:10px 0 0">Chrome asks which device to use: choose the one named
-    <b>USB JTAG/serial debug unit</b>. Setting up takes about two minutes.</p>
+    <b>USB JTAG/serial debug unit</b>. Setting up takes about two minutes (four with the backup);
+    keep this page in front meanwhile.</p>
   </section>
 
   <section class="card" id="progressbox" hidden>
@@ -317,7 +318,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function installer(port) {
   for (let attempt = 1; ; attempt++) {
     const transport = new Transport(port, false);
-    const loader = new ESPLoader({ transport, baudrate: 921600,
+    const loader = new ESPLoader({ transport, baudrate: 921600, serialOptions: { bufferSize: 64 * 1024 },
       terminal: { clean() {}, writeLine: (l) => log(l + "\n"), write: (t) => log(t) } });
     let timer;
     try {
@@ -356,20 +357,40 @@ async function writeFlash(loader, files) {
 const FLASH_SIZE = 16 * 1024 * 1024, BLOCK = 64 * 1024;
 const ERASED_MD5 = "ecb99e6ffea7be1e5419350f725da86b"; // MD5 of 64 KB of 0xFF
 
-async function readBackup(loader) {
+// session: {loader, transport}, replaced by a new installer session when a step fails (up to
+// 3 times), which goes on where it stopped.
+async function readBackup(session, reconnect) {
   const image = new Uint8Array(FLASH_SIZE).fill(0xff);
-  const used = [];
+  const md5 = new Map(); // block address -> MD5, for the blocks in use
+  let retries = 0;
+  const retry = async (what, e) => {
+    log(`backup: ${what} failed: ${e.message || e}\n`);
+    if (++retries > 3) throw new Error("The backup failed: the robot stopped answering. Keep this page in front while it runs, and try again.");
+    session = await reconnect(session);
+  };
   $("bar").hidden = false;
-  for (let a = 0; a < FLASH_SIZE; a += BLOCK) {
-    if ((await loader.flashMd5sum(a, BLOCK)).toLowerCase() !== ERASED_MD5) used.push(a);
-    $("bar").value = 0.1 * (a + BLOCK) / FLASH_SIZE;
+  const t0 = Date.now();
+  for (let a = 0; a < FLASH_SIZE; ) {
+    try {
+      const sum = (await session.loader.flashMd5sum(a, BLOCK)).toLowerCase();
+      if (sum !== ERASED_MD5) md5.set(a, sum);
+      a += BLOCK;
+      $("bar").value = 0.1 * a / FLASH_SIZE;
+    } catch (e) { await retry(`checking 0x${a.toString(16)}`, e); }
   }
-  for (let i = 0; i < used.length; i++) {
-    image.set(await loader.readFlash(used[i], BLOCK), used[i]);
-    $("bar").value = 0.1 + 0.9 * (i + 1) / used.length;
+  log(`backup: ${md5.size} of ${FLASH_SIZE / BLOCK} blocks in use (${Math.round((Date.now() - t0) / 1000)} s)\n`);
+  const used = [...md5.keys()];
+  for (let i = 0; i < used.length; ) {
+    try {
+      image.set(await session.loader.readFlash(used[i], BLOCK), used[i]);
+      i++;
+      $("bar").value = 0.1 + 0.9 * i / used.length;
+      if (i % 16 === 0) log(`backup: ${i}/${used.length} blocks read (${Math.round((Date.now() - t0) / 1000)} s)\n`);
+    } catch (e) { await retry(`reading 0x${used[i].toString(16)}`, e); }
   }
   $("bar").hidden = true;
-  return image;
+  log(`backup: done in ${Math.round((Date.now() - t0) / 1000)} s\n`);
+  return { image, session };
 }
 
 // What the image holds: the running app's description (esp_app_desc_t), found through the
@@ -503,7 +524,12 @@ $("start").onclick = async () => {
       session = await installer(port);
       if (backup && !before?.original) {
         step(s++);
-        const image = await readBackup(session.loader);
+        const reconnect = async (old) => {
+          try { await old.transport.disconnect(); } catch {}
+          await sleep(1000);
+          return (session = await installer(port));
+        };
+        const { image } = await readBackup(session, reconnect);
         const mac = (await session.loader.chip.readMac(session.loader)).replace(/:/g, "").toLowerCase();
         const day = new Date().toISOString().slice(0, 10);
         original = { ...identify(image), sha256: await sha256(image), size: image.length, saved: day };
