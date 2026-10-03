@@ -115,7 +115,7 @@
     <label class="radio"><input type="radio" name="srv" value="own"> <span>My own server</span></label>
     <div id="ownsrv" hidden>
       <label>Server URL <input type="url" id="srvurl" placeholder="ws://192.168.1.10:8765"></label>
-      <label>Robot token (the server's robot-token file) <input type="password" id="srvtoken" autocomplete="off"></label>
+      <label>Robot token (the content of the server's robot-token file) <input type="password" id="srvtoken" autocomplete="off"></label>
     </div>
     <p class="muted">Developers: the same over USB from a terminal with <code>stackchan-usb</code>
     (<a href="https://github.com/mj41/stackchan-server#set-a-robot-up-over-usb">readme</a>). Your own
@@ -242,7 +242,11 @@ async function firmwareFiles() {
 async function flash(port, files) {
   const transport = new Transport(port, false);
   const loader = new ESPLoader({ transport, baudrate: 921600, terminal: { clean() {}, writeLine() {}, write() {} } });
-  const chip = await loader.main();
+  let timer;
+  const chip = await Promise.race([loader.main(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(
+    "The robot does not answer the installer. Hold its reset button until the green LED lights up, then press the button here again.")), 30000); })])
+    .finally(() => clearTimeout(timer))
+    .catch(async (e) => { try { await transport.disconnect(); } catch {} throw e; });
   if (!/ESP32-S3/i.test(chip)) throw new Error(`This is ${chip}, not a Stackchan (ESP32-S3).`);
   $("bar").hidden = false;
   const total = files.reduce((n, f) => n + f.data.length, 0);
@@ -264,14 +268,26 @@ $("start").onclick = async () => {
   $("error").textContent = "";
   $("done").hidden = true;
   const fw = radio("fw"), own = radio("srv") === "own";
+  const ownURL = $("srvurl").value.trim(), ownToken = $("srvtoken").value.trim();
+  if (own) { // checked before anything happens to the robot
+    let bad = "";
+    if (!/^wss?:\/\/[^/]/.test(ownURL)) bad = "Own server: give its URL, starting with ws:// or wss://.";
+    else if (/^wss?:\/\/(localhost|127\.|\[::1\])/i.test(ownURL)) bad = "Own server: localhost on the robot is the robot itself. Use the computer's address in your network, e.g. ws://192.168.1.10:8765.";
+    else if (!ownToken) bad = "Own server: give its robot token (the content of its robot-token file). Only a server with your account (\"This server\") makes one for you.";
+    if (bad) { $("options").open = true; $("progressbox").hidden = false; $("steps").replaceChildren(); $("error").textContent = bad; return; }
+  }
   const names = ["Connect to the robot"];
   if (fw !== "keep") names.push("Install the firmware");
   names.push("Read the robot's id", own ? "Use your server" : "Add the robot to your account", "Write the settings", "Restart into Embody Mode");
   let port;
   try {
     port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] });
-  } catch { return; } // the chooser was closed
+  } catch (e) {
+    if (e.name !== "NotFoundError") { $("progressbox").hidden = false; $("steps").replaceChildren(); $("error").textContent = "Chrome could not open the USB device chooser: " + e.message; }
+    return; // NotFoundError: the chooser was closed without a choice
+  }
   $("start").disabled = true;
+  $("start").textContent = "Setting up…";
   $("progressbox").hidden = false;
   steps(names);
   let s = 0, robot;
@@ -289,10 +305,7 @@ $("start").onclick = async () => {
     step(s++);
     let server;
     if (own) {
-      const url = $("srvurl").value.trim(), token = $("srvtoken").value.trim();
-      if (!/^wss?:\/\//.test(url) || !token) throw new Error("Own server: give its URL (ws:// or wss://) and the robot token.");
-      if (/^wss?:\/\/(localhost|127\.|\[::1\])/i.test(url)) throw new Error("Own server: localhost on the robot is the robot itself. Use the computer's address in your network, e.g. ws://192.168.1.10:8765.");
-      server = { name: new URL(url.replace(/^ws/, "http")).host, url, token };
+      server = { name: new URL(ownURL.replace(/^ws/, "http")).host, url: ownURL, token: ownToken };
     } else {
       const res = await fetch("/api/my/robots", {
         method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
@@ -320,6 +333,7 @@ $("start").onclick = async () => {
   } finally {
     if (robot) await robot.close(); else try { await port.close(); } catch {}
     $("start").disabled = false;
+    $("start").textContent = "Set up my robot";
     refresh();
   }
 };
