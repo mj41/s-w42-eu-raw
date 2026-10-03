@@ -88,8 +88,14 @@ stackchan-server -public-url https://chan.example \
   -admin-emails you@example.com -robots-per-account 3 -state-file /state/state.json
 ```
 
-- Signing in gives no access to any robot: browsers still pair only by the code on the
-  robot's own screen.
+- **Private or public.** With sign-in configured, every robot is private by default: only its
+  owner, signed in, can pair with it and use it (the account that added it; for the
+  server's own robots, the admins), and the owner's signed-in browsers get their robots
+  without a code. Anyone else, even with the code from its screen, gets "this robot is
+  private". The owner can make a robot **public** on the Your robots page: then the code
+  pairs anyone, as on a server without sign-in. Making it private again unpairs everybody
+  else. Anonymous browsers cannot send "Ask a paired phone" requests, so they bother nobody.
+- Without sign-in configured (a LAN server), every robot is public, as before.
 - An account may add `-robots-per-account` robots (default 3); `-admin-emails` (verified
   e-mails) have no limit and may remove any added robot.
 - Ids of robots that connected with the shared token belong to the owner and cannot be

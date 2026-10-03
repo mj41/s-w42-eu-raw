@@ -76,6 +76,16 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "too many wrong codes from this address, try again later", http.StatusTooManyRequests)
 		return
 	}
+	// A private robot pairs only with its owner, signed in; the code stays valid for them.
+	s.mu.Lock()
+	pc, known := s.codes[code]
+	private := known && !s.mayPairLocked(session, pc.robotID)
+	s.mu.Unlock()
+	if private {
+		authPage(w, http.StatusForbidden, "This robot is private",
+			`Only its owner can pair with it: <a href="/auth/login">sign in</a> with the account that added it.`)
+		return
+	}
 
 	robotID, viewers, conn, ok := s.redeem(session, code)
 	if !ok {

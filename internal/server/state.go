@@ -36,6 +36,7 @@ type stateFile struct {
 	Logins      map[string]Account `json:"logins,omitempty"`        // browser session id -> signed-in account
 	Owned       []ownedInvite      `json:"owned_invites,omitempty"` // robots added by accounts (token hashes only)
 	OwnerRobots []string           `json:"owner_robots,omitempty"`  // ids seen with the shared token
+	Public      []string           `json:"public_robots,omitempty"` // robots anyone may pair with by code
 }
 
 type robotRecord struct {
@@ -112,6 +113,9 @@ func (s *Server) loadState() error {
 	for _, id := range st.OwnerRobots {
 		s.ownerRobots[id] = true
 	}
+	for _, id := range st.Public {
+		s.public[id] = true
+	}
 	s.log.Info("state loaded", "file", s.cfg.StateFile, "sessions", len(st.Sessions), "robots", len(st.Robots))
 	return nil
 }
@@ -138,6 +142,10 @@ func (s *Server) snapshot() ([]byte, error) {
 		st.OwnerRobots = append(st.OwnerRobots, id)
 	}
 	slices.Sort(st.OwnerRobots)
+	for id := range s.public {
+		st.Public = append(st.Public, id)
+	}
+	slices.Sort(st.Public)
 	for _, r := range s.robots {
 		rec := robotRecord{
 			ID: r.id, Capabilities: r.caps, Labels: r.labels, LastSeen: r.lastSeen,

@@ -1444,6 +1444,16 @@ fetch("/api/me", { credentials: "same-origin" }).then((r) => r.json()).then((me)
     const a = document.createElement("a");
     a.href = "/auth/login"; a.textContent = "Sign in";
     acct.append(a);
+    // On a server with sign-in, robots are private to their owners: no join requests from
+    // anonymous browsers (they would only bother others); sign in instead.
+    const join = document.getElementById("join");
+    if (join) {
+      const link = document.createElement("a");
+      link.href = "/auth/login"; link.textContent = "Sign in to see your robots";
+      join.replaceWith(link);
+      const status = document.getElementById("joinStatus");
+      if (status) status.remove();
+    }
   }
 }).catch(() => {});
 // Refresh "seen … ago" for offline robots.

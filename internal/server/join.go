@@ -39,6 +39,10 @@ func (s *Server) handleJoinRequest(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, signedIn := s.logins[session]; s.oidc != nil && !signedIn {
+		http.Error(w, "sign in first", http.StatusUnauthorized) // anonymous browsers do not bother anyone
+		return
+	}
 	s.pruneJoins(now)
 	for _, j := range s.joins {
 		if j.session == session {
@@ -108,8 +112,16 @@ func (s *Server) handleJoinDecision(w http.ResponseWriter, r *http.Request) {
 		if s.sessions[j.session] == nil {
 			s.sessions[j.session] = map[string]bool{}
 		}
+		shared := robots[:0:0]
 		for _, id := range robots {
-			s.sessions[j.session][id] = true
+			if s.mayPairLocked(j.session, id) { // private robots only to their owner
+				s.sessions[j.session][id] = true
+				shared = append(shared, id)
+			}
+		}
+		robots = shared
+		if len(shared) == 0 {
+			status = "denied"
 		}
 		s.requestSave()
 	}

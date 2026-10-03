@@ -69,8 +69,8 @@
 
   <section class="card" id="signin" hidden>
     <h2>Sign in</h2>
-    <p>Sign in to add robots. Your account only says who added a robot; to see or control
-    one, you still pair by scanning the QR code on its screen.</p>
+    <p>Sign in to add your robots and to use them: robots are private to the account that
+    added them, unless their owner makes them public.</p>
     <a class="button" href="/auth/login">Sign in with GitHub or Google</a>
   </section>
 
@@ -80,7 +80,9 @@
   </section>
 
   <section class="card" id="mine" hidden>
-    <h2>Robots you added</h2>
+    <h2>Your robots</h2>
+    <p class="muted"><b>Private</b> (the default): only you, signed in, see and control it, on
+    any device where you sign in. <b>Public</b>: anyone who sees its screen can pair with the code.</p>
     <div id="mylist"></div>
     <p class="muted" id="limit"></p>
   </section>
@@ -183,19 +185,36 @@ async function loadMe() {
     list.replaceChildren();
     if (!me.robots.length) list.append(el("p", { class: "muted", text: "None yet: add one below." }));
     for (const r of me.robots) {
-      list.append(el("div", { class: "robot" }, [
+      const access = el("button", {
+        class: "soft small", text: r.public ? "Public" : "Private",
+        title: r.public ? "Anyone who sees its screen can pair with the code. Click to make it private."
+                        : "Only you, signed in, can see and control it. Click to make it public.",
+        onclick: async () => {
+          const msg = r.public
+            ? `Make ${r.id} private? Only you, signed in, can then use it; everybody else is unpaired.`
+            : `Make ${r.id} public? Anyone who sees its screen can then pair with the code and use it.`;
+          if (!confirm(msg)) return;
+          try { await api("POST", "/api/my/robots/" + encodeURIComponent(r.id) + "/access", { public: !r.public }); }
+          catch (e) { alert(e.message); }
+          loadMe(); loadPaired();
+        } });
+      const row = [
         el("span", { class: "dot" + (r.online ? " on" : "") }),
-        el("span", { class: "id", text: r.id }),
-        el("span", { class: "muted", text: r.online ? "online" : "offline" }),
+        el("a", { class: "id", href: "/?paired=" + encodeURIComponent(r.id), text: r.id }),
+        el("span", { class: "muted", text: (r.online ? "online" : "offline") + (r.added ? "" : " · server's own") }),
+        access,
+      ];
+      if (r.added) row.push(
         el("button", { class: "soft small", text: "New token", title: "The old token stops working", onclick: () => {
           if (confirm(`New token for ${r.id}? The old one stops working; the robot needs the new one.`)) addRobot(r.id);
         } }),
         el("button", { class: "soft small", text: "Remove", onclick: async () => {
           if (!confirm(`Remove ${r.id}? Its token stops working at once.`)) return;
           try { await api("DELETE", "/api/my/robots/" + encodeURIComponent(r.id)); } catch (e) { alert(e.message); }
-          loadMe();
+          loadMe(); loadPaired();
         } }),
-      ]));
+      );
+      list.append(el("div", { class: "robot" }, row));
     }
     $("limit").textContent = me.admin ? "" : `You can add up to ${me.limit} robots.`;
   } else if (me.sign_in) {

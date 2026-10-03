@@ -66,6 +66,7 @@ type Server struct {
 	logins      map[string]Account     // browser session id -> signed-in account
 	owned       map[string]ownedInvite // robot id -> invite added by an account
 	ownerRobots map[string]bool        // robot ids seen with the shared token: never claimable
+	public      map[string]bool        // robots anyone may pair with by code (access.go); the rest are private
 
 	robotFails *failLimiter               // failed robot logins per address
 	pairFails  *failLimiter               // wrong pairing codes per address
@@ -162,6 +163,7 @@ func New(cfg Config) *Server {
 		logins:       map[string]Account{},
 		owned:        map[string]ownedInvite{},
 		ownerRobots:  map[string]bool{},
+		public:       map[string]bool{},
 	}
 	if cfg.RobotTokensFile != "" {
 		s.invites = newRobotInvites(cfg.RobotTokensFile)
@@ -193,6 +195,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/me", s.handleMe)
 	mux.HandleFunc("POST /api/my/robots", s.handleAddMyRobot)
 	mux.HandleFunc("DELETE /api/my/robots/{id}", s.handleRemoveMyRobot)
+	mux.HandleFunc("POST /api/my/robots/{id}/access", s.handleRobotAccess)
 	mux.HandleFunc("POST /api/join", s.handleJoinRequest)
 	mux.HandleFunc("POST /api/join/{id}/{decision}", s.handleJoinDecision)
 	mux.HandleFunc("GET /api/events", s.handleEvents)

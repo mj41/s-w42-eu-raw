@@ -205,6 +205,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	s.logins[session] = acct
+	s.pairOwnedLocked(session, acct)
 	s.mu.Unlock()
 	s.requestSave()
 	s.log.Info("signed in", "account", accountLogID(acct.Key))
@@ -285,23 +286,35 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 type myRobot struct {
 	ID      string    `json:"id"`
-	Created time.Time `json:"created"`
+	Created time.Time `json:"created,omitzero"`
 	Online  bool      `json:"online"`
+	Public  bool      `json:"public"`
+	Added   bool      `json:"added"` // false: one of the server's own robots (admins)
 }
 
 // GET /api/me
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	a, ok := s.account(s.session(w, r))
+	session := s.session(w, r)
+	a, ok := s.account(session)
 	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{"signed_in": false, "sign_in": s.oidc != nil})
 		return
 	}
 	s.mu.Lock()
+	s.pairOwnedLocked(session, a) // robots added or connected since sign-in
+	online := func(id string) bool { st := s.robots[id]; return st != nil && st.conn != nil }
 	robots := []myRobot{}
 	for _, inv := range s.owned {
 		if inv.Owner == a.Key {
-			st := s.robots[inv.RobotID]
-			robots = append(robots, myRobot{ID: inv.RobotID, Created: inv.Created, Online: st != nil && st.conn != nil})
+			robots = append(robots, myRobot{ID: inv.RobotID, Created: inv.Created, Online: online(inv.RobotID),
+				Public: s.public[inv.RobotID], Added: true})
+		}
+	}
+	if s.isAdmin(a) {
+		for id := range s.ownerRobots {
+			if _, added := s.owned[id]; !added {
+				robots = append(robots, myRobot{ID: id, Online: online(id), Public: s.public[id]})
+			}
 		}
 	}
 	s.mu.Unlock()
@@ -368,6 +381,10 @@ func (s *Server) handleAddMyRobot(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.owned[id] = ownedInvite{RobotID: id, Hash: hash, Owner: a.Key, OwnerName: a.Name, Created: time.Now()}
+	if !exists {
+		delete(s.public, id) // a newly added robot starts private
+	}
+	s.pairOwnedLocked(s.session(w, r), a)
 	var conn *robotConn
 	if st := s.robots[id]; st != nil && exists {
 		conn = st.conn // connected with the old token: it must use the new one
