@@ -181,8 +181,13 @@ function step(i) {
 // --- the robot's USB setup protocol (firmware usb_setup.h) ---
 class Robot {
   constructor(port) { this.port = port; this.waiting = null; this.buf = ""; }
-  async open() {
+  async open({ reset = false } = {}) {
     if (!this.port.readable) await this.port.open({ baudRate: 115200 });
+    if (reset) { // a hard reset as esptool does it on the USB-JTAG port: RTS pulse with DTR low
+      await this.port.setSignals({ dataTerminalReady: false, requestToSend: true });
+      await new Promise((r) => setTimeout(r, 100));
+      await this.port.setSignals({ dataTerminalReady: false, requestToSend: false });
+    }
     this.reader = this.port.readable.getReader();
     this.writer = this.port.writable.getWriter();
     this.reading = (async () => {
@@ -259,7 +264,8 @@ async function flash(port, files) {
     },
   });
   $("bar").hidden = true;
-  await loader.after("hard_reset");
+  // No loader.after("hard_reset"): esptool-js 0.7.0 only drops RTS without raising it first,
+  // which leaves the chip in the flasher; Robot.open({ reset: true }) restarts it instead.
   await transport.disconnect();
 }
 
@@ -300,7 +306,7 @@ $("start").onclick = async () => {
     }
     step(s++);
     robot = new Robot(port);
-    await robot.open();
+    await robot.open({ reset: true }); // starts new firmware, or leaves the flasher after an earlier try
     const hello = await robot.ask({ op: "hello" }, 40000);
     step(s++);
     let server;
