@@ -155,6 +155,9 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 | `proximity` | `{"on": bool}`: the proximity sensor, whose IR LED next to the camera pulses ~10×/s. Off stops the LED and the approach events; light and auto-brightness keep working. Telemetry `proximity_on` |
 | `power_led` | `{"mode": "on\|off\|blink\|fast\|charging"}`: the red power LED; `charging` hands it back to the charger |
 | `nfc` | `{"on": bool}`: NFC tag polling, on by default. Listed only when the robot found its reader |
+| `automation` | `{"autostart": bool}`: open Embody Mode after every power-on or restart (stored on the robot, off until set); the robot answers with an `automation {autostart}` event, also sent after it registers. Only with firmware built with `CONFIG_STACKCHAN_EMBODY_AUTOMATION` (off by default), like the next two |
+| `restart` | none: restart the robot, back into Embody Mode |
+| `launch` | `{"app": "AVATAR\|AI.AGENT\|DANCE\|SETUP\|…"}`: restart into another launcher app once (`""` = the launcher); `launch_unknown {app}` event for a name it does not have |
 | `car_enable` | `{"on": bool, "board"?: "v1\|v2\|both"}`: the optional TPBot car (micro:bit with [tpbot-ble](https://github.com/mj41/tpbot-ble)) over BLE (firmware `CONFIG_STACKCHAN_EMBODY_CAR`). Off by default and kept on the robot. While on, the robot registers again with the `car_*` commands and telemetry listed in sbot's readme, [Car capability](https://github.com/mj41/sbot#car-capability), plus `car_connected`, and sends `car_connected` / `car_disconnected` events. This dashboard has no car controls; sbot has |
 
 ### Binary messages
