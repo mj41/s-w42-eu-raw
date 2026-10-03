@@ -639,12 +639,13 @@ $("start").onclick = async () => {
       pairURL = await pairLink();
     }
     step(s);
+    const pinned = chosen.find((a) => a.url === pin);
+    const target = pinned && pin !== server.url ? pinned.name : server.name;
     $("donetext").textContent = (req.wifi ? "Your robot restarts and connects to Wi-Fi “" + req.wifi.ssid + "”" :
       "Your robot restarts. If it does not know your Wi-Fi yet, it opens a hotspot: connect your phone to it and choose your network") +
-      (me.signed_in && !own ? `, then to ${server.name}. It is private: open the dashboard here, signed in, to see it.`
-        : `, then to ${server.name}.` + (pairURL ? " The button below opens it and pairs this browser; for your phone, scan the QR code on the robot's screen." : " Scan the QR code on its screen with your phone to pair."));
+      (me.signed_in && !own ? `, then to ${target}. It is private: open the dashboard here, signed in, to see it.`
+        : `, then to ${target}.` + (pairURL ? " The button below opens it and pairs this browser; for your phone, scan the QR code on the robot's screen." : " Scan the QR code on its screen with your phone to pair."));
     // Open the pinned app: this server's dashboard, or the other server's page.
-    const pinned = chosen.find((a) => a.url === pin);
     $("donelink").href = pairURL || (pin === server.url && !own ? "/" : pin.replace(/^ws/, "http"));
     $("donelink").textContent = (pinned && pin !== server.url ? `Open ${pinned.name}` : "Open the dashboard") + (pairURL ? " (paired)" : "");
     $("donelink").hidden = false;
