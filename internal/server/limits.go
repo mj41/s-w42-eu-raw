@@ -149,3 +149,81 @@ func (s *Server) clientIP(r *http.Request) string {
 	}
 	return r.RemoteAddr
 }
+
+// Browser limits: open event streams and media sockets per session and per address, and a
+// command budget per session, so one page (or a script) cannot tie up the server or flood a
+// robot.
+const (
+	maxSSEPerSession   = 8
+	maxSSEPerAddr      = 30
+	maxMediaPerSession = 4 // per robot
+	maxMediaPerAddr    = 20
+	commandsPerSec     = 20
+	commandBurst       = 60
+	maxCommandBuckets  = 10000
+)
+
+// streamLimiter counts open streams per key.
+type streamLimiter struct {
+	mu   sync.Mutex
+	open map[string]int
+}
+
+func newStreamLimiter() *streamLimiter { return &streamLimiter{open: map[string]int{}} }
+
+// acquire opens one stream for every key, or none if any key is at its limit.
+func (l *streamLimiter) acquire(keys map[string]int) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for k, max := range keys {
+		if l.open[k] >= max {
+			return false
+		}
+	}
+	for k := range keys {
+		l.open[k]++
+	}
+	return true
+}
+
+func (l *streamLimiter) release(keys map[string]int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for k := range keys {
+		if l.open[k]--; l.open[k] <= 0 {
+			delete(l.open, k)
+		}
+	}
+}
+
+// streamKeys are the limits for one stream: always per session, per address unless the
+// server cannot see client addresses.
+func (s *Server) streamKeys(kind, session, ip string, perSession, perAddr int) map[string]int {
+	keys := map[string]int{kind + " session " + session: perSession}
+	if !s.cfg.NoAddressLimits {
+		keys[kind+" addr "+ip] = perAddr
+	}
+	return keys
+}
+
+// commandAllowed spends one command from the session's budget.
+func (s *Server) commandAllowed(session string, now time.Time) bool {
+	s.cmdMu.Lock()
+	defer s.cmdMu.Unlock()
+	b := s.cmdBuckets[session]
+	if b == nil {
+		if len(s.cmdBuckets) >= maxCommandBuckets {
+			for k, v := range s.cmdBuckets {
+				if now.Sub(v.last) > time.Minute {
+					delete(s.cmdBuckets, k)
+				}
+			}
+			if len(s.cmdBuckets) >= maxCommandBuckets {
+				s.cmdBuckets = map[string]*bucket{}
+			}
+		}
+		b = newBucket(commandsPerSec, commandBurst, now)
+		s.cmdBuckets[session] = b
+	}
+	return b.take(1, now)
+}

@@ -16,7 +16,7 @@
 | State | in memory, plus a JSON snapshot on restart; one instance only | a crash or a deploy loses live state |
 | Audio | raw PCM, about 48 KB/s | too heavy for mobile networks |
 | Quality checks | tests run on the developer's machine; CI only builds release images | the v0.2.0 image build broke without anyone noticing before the tag |
-| Abuse | join requests, failed robot logins and wrong pairing codes are limited per address; invited robots have send budgets; browsers' streams are not limited yet | a public instance needs more |
+| Abuse | join requests, failed robot logins and wrong pairing codes are limited per address; invited robots have send budgets; browsers' streams and commands are limited per session and address | an external review is still to come |
 
 ## Stages
 

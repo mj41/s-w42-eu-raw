@@ -31,6 +31,10 @@ func validAssetName(name string) bool {
 func (s *Server) handleAssetUpload(w http.ResponseWriter, r *http.Request) {
 	session := s.session(w, r)
 	id := r.PathValue("id")
+	if !s.commandAllowed(session, time.Now()) {
+		http.Error(w, "too many requests, slow down", http.StatusTooManyRequests)
+		return
+	}
 	name := r.URL.Query().Get("name")
 	if r.Header.Get(uploadHeader) != "1" {
 		http.Error(w, "missing "+uploadHeader+": 1", http.StatusBadRequest)

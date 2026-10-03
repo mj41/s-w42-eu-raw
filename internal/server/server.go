@@ -68,7 +68,10 @@ type Server struct {
 	ownerRobots map[string]bool        // robot ids seen with the shared token: never claimable
 	public      map[string]bool        // robots anyone may pair with by code (access.go); the rest are private
 
-	robotFails *failLimiter               // failed robot logins per address
+	robotFails *failLimiter   // failed robot logins per address
+	streams    *streamLimiter // open browser streams per session and address
+	cmdMu      sync.Mutex
+	cmdBuckets map[string]*bucket         // command budget per browser session
 	pairFails  *failLimiter               // wrong pairing codes per address
 	sessions   map[string]map[string]bool // browser session id -> paired robot ids
 	subs       map[*subscriber]struct{}   // open SSE streams
@@ -160,6 +163,8 @@ func New(cfg Config) *Server {
 		robotFails:   newFailLimiter(maxRobotAuthFails, failWindow, cfg.NoAddressLimits),
 		pairFails:    newFailLimiter(maxPairFails, failWindow, cfg.NoAddressLimits),
 		oidc:         newOIDCLogin(cfg),
+		streams:      newStreamLimiter(),
+		cmdBuckets:   map[string]*bucket{},
 		logins:       map[string]Account{},
 		owned:        map[string]ownedInvite{},
 		ownerRobots:  map[string]bool{},

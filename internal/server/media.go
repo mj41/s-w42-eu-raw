@@ -145,6 +145,12 @@ func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "robot not paired with this browser", http.StatusForbidden)
 		return
 	}
+	keys := s.streamKeys("media", session+" "+id, s.clientIP(r), maxMediaPerSession, maxMediaPerAddr)
+	if !s.streams.acquire(keys) {
+		http.Error(w, "too many open media streams", http.StatusTooManyRequests)
+		return
+	}
+	defer s.streams.release(keys)
 	ws, err := browserUpgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return // Upgrade already answered (e.g. 403 for a foreign origin)
@@ -214,6 +220,10 @@ func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handlePicture(w http.ResponseWriter, r *http.Request) {
 	session := s.session(w, r)
 	id := r.PathValue("id")
+	if !s.commandAllowed(session, time.Now()) {
+		http.Error(w, "too many requests, slow down", http.StatusTooManyRequests)
+		return
+	}
 	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "image/jpeg" {
 		http.Error(w, "Content-Type must be image/jpeg", http.StatusUnsupportedMediaType)
 		return

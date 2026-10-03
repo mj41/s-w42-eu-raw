@@ -128,6 +128,13 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
 
+	keys := s.streamKeys("sse", session, s.clientIP(r), maxSSEPerSession, maxSSEPerAddr)
+	if !s.streams.acquire(keys) {
+		http.Error(w, "too many open event streams", http.StatusTooManyRequests)
+		return
+	}
+	defer s.streams.release(keys)
+
 	sub := &subscriber{session: session, events: make(chan sseEvent, 32)}
 	s.mu.Lock()
 	s.subs[sub] = struct{}{}
@@ -188,6 +195,10 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 	session := s.session(w, r)
 	id := r.PathValue("id")
+	if !s.commandAllowed(session, time.Now()) {
+		http.Error(w, "too many commands, slow down", http.StatusTooManyRequests)
+		return
+	}
 
 	// Requiring JSON forces a CORS preflight for cross-site requests.
 	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {

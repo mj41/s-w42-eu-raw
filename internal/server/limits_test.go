@@ -157,3 +157,60 @@ func TestGuestRobotFloodDisconnected(t *testing.T) {
 		}
 	}
 }
+
+func TestEventStreamsPerSession(t *testing.T) {
+	ts, _ := newTestServer(t)
+	robot := connectRobot(t, ts, "chan-1", wire.ClassRobot)
+	browser := pairBrowser(t, robot)
+	var open []*http.Response
+	for i := 0; i < maxSSEPerSession; i++ {
+		resp, err := browser.Get(ts.URL + "/api/events")
+		if err != nil || resp.StatusCode != http.StatusOK {
+			t.Fatalf("stream %d: %v %v", i, err, resp)
+		}
+		open = append(open, resp)
+	}
+	resp, err := browser.Get(ts.URL + "/api/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("stream over the limit: %d", resp.StatusCode)
+	}
+	// Closing one frees its place.
+	open[0].Body.Close()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		resp, err := browser.Get(ts.URL + "/api/events")
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resp.Body.Close()
+			break
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("a closed stream did not free its place")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	for _, r := range open[1:] {
+		r.Body.Close()
+	}
+}
+
+func TestCommandBudget(t *testing.T) {
+	ts, _ := newTestServer(t)
+	robot := connectRobot(t, ts, "chan-1", wire.ClassRobot)
+	browser := pairBrowser(t, robot)
+	limited := 0
+	for i := 0; i < commandBurst+20; i++ {
+		if postCommand(t, browser, ts, "chan-1", "nod") == http.StatusTooManyRequests {
+			limited++
+		}
+	}
+	if limited == 0 || limited > 25 {
+		t.Fatalf("%d of %d commands limited, want some after a burst of %d", limited, commandBurst+20, commandBurst)
+	}
+}
