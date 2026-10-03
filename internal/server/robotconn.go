@@ -75,13 +75,15 @@ func (c *robotConn) queue(m outMsg) bool {
 
 func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 	token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if !s.tokenOK(token) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
 	id := wire.DeviceID(r.Header)
 	if !robotIDPattern.MatchString(id) {
 		http.Error(w, "missing or invalid "+wire.DeviceIDHeader, http.StatusBadRequest)
+		return
+	}
+	ok, guest := s.robotAuth(id, token)
+	if !ok {
+		s.log.Info("robot unauthorized", "robot", id, "remote", clientIP(r))
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
@@ -107,13 +109,14 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 	s.attach(c, reg)
 	defer s.detach(c)
 	s.log.Info("robot connected", "robot", id, "model", reg.Capabilities.Model,
-		"firmware", reg.Capabilities.Firmware, "remote", clientIP(r))
+		"firmware", reg.Capabilities.Firmware, "guest", guest, "remote", clientIP(r))
 	defer s.log.Info("robot disconnected", "robot", id)
 
 	if f, err := wire.Marshal(wire.KindAccepted, wire.Meta{WorkerID: id, SessionID: newCode()}, nil); err == nil {
 		c.enqueue(f)
 	}
-	if len(s.cfg.Offers) > 0 {
+	// Offers carry the other servers' tokens: only for the owner's robots, never guests.
+	if len(s.cfg.Offers) > 0 && !guest {
 		if f, err := wire.Marshal(wire.KindServerOffer, wire.Meta{WorkerID: id}, wire.ServerOfferBody{Servers: s.cfg.Offers}); err == nil {
 			c.enqueue(f)
 		}

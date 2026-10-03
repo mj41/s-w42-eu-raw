@@ -29,14 +29,15 @@ var uiFS embed.FS
 
 // Config configures a Server.
 type Config struct {
-	RobotToken string               // shared bearer token robots must present
-	PublicURL  string               // base URL browsers use, e.g. http://192.168.1.10:8765
-	PairTTL    time.Duration        // lifetime of a pairing code
-	UIDir      string               // development: serve index.html from this directory instead of the embedded copy
-	StateFile  string               // JSON snapshot of pairings and robots, loaded by New (see state.go); "" disables
-	HTTPSPort  string               // port of the HTTPS listener for browsers, if any; advertised by /api/info
-	Offers     []wire.OfferedServer // other servers robots may switch to, sent as ServerOffer
-	Log        *slog.Logger
+	RobotToken      string               // shared bearer token robots must present
+	RobotTokensFile string               // optional per-robot invite tokens (see invites.go); "" disables
+	PublicURL       string               // base URL browsers use, e.g. http://192.168.1.10:8765
+	PairTTL         time.Duration        // lifetime of a pairing code
+	UIDir           string               // development: serve index.html from this directory instead of the embedded copy
+	StateFile       string               // JSON snapshot of pairings and robots, loaded by New (see state.go); "" disables
+	HTTPSPort       string               // port of the HTTPS listener for browsers, if any; advertised by /api/info
+	Offers          []wire.OfferedServer // other servers robots may switch to, sent as ServerOffer
+	Log             *slog.Logger
 }
 
 // Server holds all state in memory. With Config.StateFile, pairings and known
@@ -48,6 +49,7 @@ type Server struct {
 	mu       sync.Mutex
 	robots   map[string]*robotState     // by robot id; kept after disconnect
 	codes    map[string]pairCode        // one-time pairing codes
+	invites  *robotInvites              // per-robot invite tokens (nil: none)
 	sessions map[string]map[string]bool // browser session id -> paired robot ids
 	subs     map[*subscriber]struct{}   // open SSE streams
 	pings    map[string]pendingPing     // "robot/ping id" -> in-flight ping
@@ -136,6 +138,13 @@ func New(cfg Config) *Server {
 
 		joinLastByIP: map[string]time.Time{},
 	}
+	if cfg.RobotTokensFile != "" {
+		s.invites = newRobotInvites(cfg.RobotTokensFile)
+		if _, err := s.invites.ok("", "-"); err != nil {
+			s.log.Warn("robot tokens file not read", "file", cfg.RobotTokensFile, "err", err)
+		}
+		s.log.Info("robot invite tokens", "file", cfg.RobotTokensFile, "robots", s.invites.count())
+	}
 	if cfg.StateFile != "" {
 		if err := s.loadState(); err != nil {
 			s.log.Warn("state not loaded, starting empty", "file", cfg.StateFile, "err", err)
@@ -163,6 +172,19 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /emoji/", http.StripPrefix("/emoji/", s.emojiFiles()))
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok\n")) })
 	return mux
+}
+
+// robotAuth checks a connecting robot's token: the shared token (an owner robot) or the
+// robot's own invite token (a guest). ok is false for neither.
+func (s *Server) robotAuth(id, token string) (ok, guest bool) {
+	if s.tokenOK(token) {
+		return true, false
+	}
+	invited, err := s.invites.ok(id, token)
+	if err != nil {
+		s.log.Warn("robot tokens file", "err", err)
+	}
+	return invited, invited
 }
 
 func (s *Server) tokenOK(token string) bool {

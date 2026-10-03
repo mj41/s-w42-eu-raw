@@ -10,7 +10,7 @@
 
 | Area | Today | Why it matters |
 |---|---|---|
-| Robot identity | one shared token per server, compiled into the firmware | reading one robot's flash gives the token for all of them |
+| Robot identity | one shared token for the owner's robots, compiled into the firmware; other people's robots each get their own invite token | reading one of the owner's robots' flash gives the token for all of them |
 | Permissions | a paired browser may use every command and see all data | no guests, no "camera only for parents", no time limits |
 | Network | plain `ws://` and `http://` on the LAN; TLS only behind a proxy | anyone on the network can listen |
 | State | in memory, plus a JSON snapshot on restart; one instance only | a crash or a deploy loses live state |
@@ -41,6 +41,11 @@ Each stage leaves a release that is better than the one before, and has a clear
 works, CI is green, and the fuzzers have run without findings.
 
 ### 2. Each robot its own identity
+
+**First step, done 2026-10-03:** per-robot invite tokens (`-robot-tokens-file`,
+`stackchan-server invite`): each invited robot has its own token, bound to its id, revoked
+by deleting one line; the server keeps only the tokens' hashes. They are still bearer
+tokens in the firmware, so the steps below remain.
 
 - An **owner key** and a small tool that signs robot certificates and configuration.
 - A **device key per robot** (in its storage first, in the ESP32-S3's secure key

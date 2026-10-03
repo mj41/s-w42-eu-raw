@@ -64,10 +64,35 @@ go run ./cmd/fake-robot                    # simulated robot, in a second termin
 - `-public-url` sets the base URL put into QR codes. The default is `http://<LAN IP>:<port>`.
 - `-state-file` (default `~/.local/state/stackchan-server/state.json`, `""` disables) keeps pairings and known robots across restarts: browsers stay paired, and robots show up offline with their last telemetry and events until they reconnect. The whole file is rewritten every 5 s when something changed, right after a pairing, and on shutdown. It holds session IDs, so it is mode 0600. It is a stopgap until a real database.
 - `-tls-listen :8766` also serves the dashboard over HTTPS, for the phone's microphone ("Talk"). Without `-tls-cert`/`-tls-key` it creates a self-signed certificate for localhost, this host name and every local IP, and keeps it in `~/.config/stackchan-server/` so a phone accepts it only once. Robots stay on `-listen`. The pairing cookie is shared by both ports (same host).
-- `-offer name=wss://host[,tokenfile]` (repeatable) offers robots other servers they may switch to; with a token file, the robot also gets that server's robot token. Offers are voluntary: a server decides where its robots may go, and the robot owner can also add servers by hand.
+- `-offer name=wss://host[,tokenfile]` (repeatable) offers robots other servers they may switch to; with a token file, the robot also gets that server's robot token. Offers are voluntary: a server decides where its robots may go, and the robot owner can also add servers by hand. Offers go only to robots with the shared token, never to invited robots (below).
+- `-robot-tokens-file <file>`: other people's robots, each with its own invite token (see "Other people's robots" below). Off by default.
 - `-ui-dir internal/server/ui` serves the dashboard from disk on every request (development). UI edits then need only a page reload.
 - Open the dashboard with the same host as the QR code (e.g. `http://192.168.1.10:8765/`, not `localhost`). The pairing cookie belongs to that host.
 - Run `go test -race ./...` for the tests.
+
+### Other people's robots: invite tokens
+
+The shared robot token is for your own robots: anyone who has it can connect a robot under
+any id, and it is compiled into the firmware. For other people's robots, give each robot
+its own **invite token**:
+
+```bash
+stackchan-server invite stackchan-0a1b2c3d4e50   # the robot id its screen shows (stackchan-<MAC>)
+```
+
+It prints a new token and a line. **The token** goes to the robot's owner, for their
+`sdkconfig` (`CONFIG_STACKCHAN_EMBODY_TOKEN`). **The line** (`<robot id> <SHA-256 of the
+token>`) goes into the file you pass as `-robot-tokens-file`; the file holds no tokens.
+
+- A token works only for its own robot id, so an invited robot cannot pose as another one.
+- The server reads the file again when it changes: adding a robot (a new line) or revoking
+  one (deleting its line) needs no restart. A broken file lets no invited robot in, and is
+  logged; robots with the shared token keep working.
+- Invited robots get no server offers (`-offer`), which carry other servers' tokens.
+- Browsers still pair only by the code on the robot's own screen, so an invite gives a robot
+  a place on the server, not anyone access to it.
+- Still to do (see the [roadmap](docs/roadmap.md)): per-robot limits on a public server, and
+  end-to-end encryption through it.
 
 ## Running in a container
 

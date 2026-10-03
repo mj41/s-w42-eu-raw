@@ -4,6 +4,9 @@
 // Browsers open http://<host>/ and pair by scanning the robot's QR code.
 // With -tls-listen, the same dashboard is also served over HTTPS (for the
 // microphone, which browsers allow only on secure pages).
+//
+// Other people's robots: with -robot-tokens-file, each listed robot connects with its own
+// invite token. `stackchan-server invite <robot id>` makes one.
 package main
 
 import (
@@ -30,6 +33,9 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "invite" {
+		os.Exit(invite(os.Args[2:]))
+	}
 	var (
 		listen    = flag.String("listen", ":8765", "HTTP listen address for robots and browsers")
 		publicURL = flag.String("public-url", "", "base URL browsers use to reach this server (default: http://<LAN IP>:<port>)")
@@ -41,6 +47,7 @@ func main() {
 		tlsListen = flag.String("tls-listen", "", "also serve browsers over HTTPS on this address, e.g. :8766 (robots stay on -listen)")
 		tlsCert   = flag.String("tls-cert", defaultConfigFile("tls-cert.pem"), "TLS certificate for -tls-listen; a self-signed one is created if missing")
 		tlsKey    = flag.String("tls-key", defaultConfigFile("tls-key.pem"), "TLS key for -tls-listen")
+		invites   = flag.String("robot-tokens-file", "", "per-robot invite tokens: lines \"<robot id> <sha256 of its token>\", read again when changed (\"\" disables; see `stackchan-server invite`)")
 		offers    offerFlags
 	)
 	flag.Var(&offers, "offer", "offer robots another server: name=wss://host[,tokenfile] (repeatable; the token file holds that server's robot token)")
@@ -79,14 +86,15 @@ func main() {
 	}
 
 	srv := server.New(server.Config{
-		RobotToken: token,
-		PublicURL:  strings.TrimRight(*publicURL, "/"),
-		PairTTL:    *pairTTL,
-		UIDir:      *uiDir,
-		StateFile:  *stateFile,
-		HTTPSPort:  httpsPort,
-		Offers:     offers,
-		Log:        log,
+		RobotToken:      token,
+		PublicURL:       strings.TrimRight(*publicURL, "/"),
+		PairTTL:         *pairTTL,
+		UIDir:           *uiDir,
+		StateFile:       *stateFile,
+		RobotTokensFile: *invites,
+		HTTPSPort:       httpsPort,
+		Offers:          offers,
+		Log:             log,
 	})
 	httpSrv := &http.Server{Addr: *listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	var httpsSrv *http.Server
@@ -224,4 +232,20 @@ func (o *offerFlags) Set(v string) error {
 	}
 	*o = append(*o, offer)
 	return nil
+}
+
+// invite prints a new invite token for one robot and the line for -robot-tokens-file.
+func invite(args []string) int {
+	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
+		fmt.Fprintln(os.Stderr, "usage: stackchan-server invite <robot id>   (e.g. stackchan-0a1b2c3d4e50)")
+		return 2
+	}
+	token, line, err := server.NewRobotInvite(args[0])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "invite:", err)
+		return 1
+	}
+	fmt.Printf("Token for the robot (its sdkconfig, CONFIG_STACKCHAN_EMBODY_TOKEN); give it only to its owner:\n  %s\n", token)
+	fmt.Printf("Line for the server's -robot-tokens-file (holds only the hash):\n  %s\n", line)
+	return 0
 }
