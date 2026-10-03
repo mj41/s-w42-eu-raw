@@ -426,6 +426,27 @@ function identify(image) {
     idf: str(d + 112, 32), elf_sha256: hex(image.subarray(d + 144, d + 176)) };
 }
 
+// After the restart: the pairing link the robot shows, once it is connected to its app (up
+// to a minute). The robot comes back as a new USB device, so the port is found again.
+async function pairLink() {
+  let r = null;
+  for (const until = Date.now() + 60000; Date.now() < until; ) {
+    await sleep(2000);
+    if (!r) {
+      const ports = (await navigator.serial.getPorts()).filter((p) => p.getInfo().usbVendorId === 0x303a);
+      if (ports.length !== 1) continue;
+      r = new Robot(ports[0]);
+      try { await r.open(); } catch { r = null; continue; }
+    }
+    const res = await r.ask({ op: "pair" }, 3000, false).catch(() => null);
+    if (res?.ok && res.url) { await r.close(); log("pairing link received\n"); return res.url; }
+    if (!res) { try { await r.close(); } catch {} r = null; } // no answer: the port changed
+  }
+  if (r) try { await r.close(); } catch {}
+  log("no pairing link within a minute\n");
+  return "";
+}
+
 function offerDownload(blob, name) {
   const a = $("backuplink");
   if (a.href) URL.revokeObjectURL(a.href);
@@ -500,6 +521,7 @@ $("start").onclick = async () => {
     if (backup) names.push("Back up the current firmware");
     if (fw === "latest") names.push("Install the firmware");
     names.push("Read the robot's id", own ? "Use your server" : localSetup && !me.signed_in ? "Use this server" : "Add the robot to your account", "Write the settings", "Restart into Embody Mode");
+    if (own || !me.signed_in) names.push("Pair this browser");
   }
   let port;
   try {
@@ -607,15 +629,24 @@ $("start").onclick = async () => {
     if (!p.ok) throw new Error("The robot refused the settings: " + (p.error || "unknown"));
     step(s++);
     await robot.ask({ op: "restart" }, 8000, false).catch(() => {});
+    // Pair this browser through the robot's own link, so the app opens ready (a signed-in
+    // owner on a server with sign-in sees the robot anyway).
+    let pairURL = "";
+    if (own || !me.signed_in) {
+      step(s++);
+      await robot.close();
+      robot = null;
+      pairURL = await pairLink();
+    }
     step(s);
     $("donetext").textContent = (req.wifi ? "Your robot restarts and connects to Wi-Fi “" + req.wifi.ssid + "”" :
       "Your robot restarts. If it does not know your Wi-Fi yet, it opens a hotspot: connect your phone to it and choose your network") +
       (me.signed_in && !own ? `, then to ${server.name}. It is private: open the dashboard here, signed in, to see it.`
-        : `, then to ${server.name}: scan the QR code on its screen with your phone to pair.`);
+        : `, then to ${server.name}.` + (pairURL ? " The button below opens it and pairs this browser; for your phone, scan the QR code on the robot's screen." : " Scan the QR code on its screen with your phone to pair."));
     // Open the pinned app: this server's dashboard, or the other server's page.
     const pinned = chosen.find((a) => a.url === pin);
-    $("donelink").href = pin === server.url && !own ? "/" : pin.replace(/^ws/, "http");
-    $("donelink").textContent = pinned && pin !== server.url ? `Open ${pinned.name}` : "Open the dashboard";
+    $("donelink").href = pairURL || (pin === server.url && !own ? "/" : pin.replace(/^ws/, "http"));
+    $("donelink").textContent = (pinned && pin !== server.url ? `Open ${pinned.name}` : "Open the dashboard") + (pairURL ? " (paired)" : "");
     $("donelink").hidden = false;
     $("done").hidden = false;
     $("progressbox").hidden = true;
