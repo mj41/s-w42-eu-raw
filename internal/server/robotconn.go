@@ -11,7 +11,7 @@ import (
 	"github.com/mj41/stackchan-server/wire"
 )
 
-// Liveness timing, same as yolovm-pilot (from Rancher remotedialer).
+// Liveness timing, as in Rancher's remotedialer.
 const (
 	pingPeriod      = 5 * time.Second
 	pongWait        = 60 * time.Second

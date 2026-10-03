@@ -1,6 +1,6 @@
 # stackchan-server
 
-Relay between M5Stack Stack-chan robots and web browsers for **Embody Mode**. It lets you see through the robot and control it from any browser, with no app to install.
+Relay between M5Stack Stackchan robots and web browsers for **Embody Mode**. It lets you see through the robot and control it from any browser, with no app to install.
 
 - **Robot:** opens an outbound WebSocket to the server and registers. It then shows a QR code for pairing, streams telemetry and events, and runs commands.
 - **Browser:** scans the robot's QR code to pair, then gets a live dashboard.
@@ -9,6 +9,13 @@ Relay between M5Stack Stack-chan robots and web browsers for **Embody Mode**. It
 The robot side is the [Embody Mode app](https://github.com/mj41/StackChan/tree/embody-mj41/firmware/main/apps/app_embody_mode) in the StackChan firmware fork [mj41/StackChan](https://github.com/mj41/StackChan/tree/embody-mj41) (branch `embody-mj41`). Setting up a robot with this server, from building the firmware to pairing a phone: [SETUP.md](https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/SETUP.md).
 
 Part of [home-w42-eu](https://github.com/mj41/home-w42-eu), a local first, privacy first platform for a home: this repo holds the Go implementation of its device wire protocol (the `wire` package), which the other servers use too.
+
+> **A proof of concept, vibe coded.** Written with AI agents and tested on real hardware at
+> home, but neither the code nor its security has been reviewed by humans. Use it on your
+> own network, and don't trust it with anything private yet.
+>
+> **Want more?** Ask in the [issues](https://github.com/mj41/stackchan-server/issues), and ideally [sponsor mj41](https://github.com/sponsors/mj41) on GitHub:
+> mj41 codes for attention food.
 
 ## Dashboard
 
@@ -87,10 +94,10 @@ What any host needs:
 
 This is the device wire protocol v1. Its reference specification is [wire-protocol.md](https://github.com/mj41/home-w42-eu/blob/main/docs/wire-protocol.md) in home-w42-eu; the tables below are this server's view of it.
 
-**Connect:** `ws://<server>/api/devices/connect` (firmware before 2026-10-02 uses `/api/workers/connect`, still served) with these headers:
+**Connect:** `ws://<server>/api/devices/connect` with these headers:
 
 - `Authorization: Bearer <robot token>`
-- `X-Device-Id: <robot id>`: 1–64 of `[A-Za-z0-9._-]`. Firmware from before 2026-10-02 sends `X-Yolovm-Worker-Id` instead, which the server still accepts.
+- `X-Device-Id: <robot id>`: 1–64 of `[A-Za-z0-9._-]`.
 
 ### JSON frames
 

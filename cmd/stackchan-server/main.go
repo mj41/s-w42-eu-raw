@@ -1,4 +1,4 @@
-// Command stackchan-server relays between Stack-chan robots and browsers.
+// Command stackchan-server relays between Stackchan robots and browsers.
 //
 // Robots connect to ws://<host>/api/devices/connect with a bearer token.
 // Browsers open http://<host>/ and pair by scanning the robot's QR code.

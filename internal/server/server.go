@@ -1,4 +1,4 @@
-// Package server relays between Stack-chan robots (outbound WebSocket) and
+// Package server relays between Stackchan robots (outbound WebSocket) and
 // browsers (HTML + REST + SSE).
 //
 // Pairing: after a robot registers it gets a short-lived one-time code and
@@ -148,7 +148,6 @@ func New(cfg Config) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+wire.ConnectPath, s.handleRobotConnect)
-	mux.HandleFunc("GET "+wire.LegacyConnectPath, s.handleRobotConnect) // firmware before 2026-10-02
 	mux.HandleFunc("GET /{$}", s.handleIndex)
 	mux.HandleFunc("GET /pair", s.handlePair)
 	mux.HandleFunc("GET /api/robots", s.handleListRobots)

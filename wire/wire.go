@@ -18,23 +18,13 @@ import (
 
 // Connection handshake (wire protocol §1).
 const (
-	ConnectPath = "/api/devices/connect"
-	// LegacyConnectPath is where firmware before 2026-10-02 connects. Servers still
-	// serve it next to ConnectPath; clients use ConnectPath. Removed in protocol v2.
-	LegacyConnectPath = "/api/workers/connect"
-	DeviceIDHeader    = "X-Device-Id"
-	// LegacyDeviceIDHeader is what firmware before 2026-10-02 sends. Servers still
-	// accept it (DeviceID); clients send DeviceIDHeader. Removed in protocol v2.
-	LegacyDeviceIDHeader = "X-Yolovm-Worker-Id"
+	ConnectPath    = "/api/devices/connect"
+	DeviceIDHeader = "X-Device-Id"
 )
 
-// DeviceID returns the device id a connecting device sent: X-Device-Id, or the
-// legacy header from older firmware.
+// DeviceID returns the device id a connecting device sent in DeviceIDHeader.
 func DeviceID(h http.Header) string {
-	if id := h.Get(DeviceIDHeader); id != "" {
-		return id
-	}
-	return h.Get(LegacyDeviceIDHeader)
+	return h.Get(DeviceIDHeader)
 }
 
 // Frame kinds.
@@ -122,7 +112,7 @@ type PairedBody struct {
 	Reconnect bool `json:"reconnect,omitempty"`
 }
 
-// RobotCommandBody is one command. The "basic" command set a Stack-chan offers:
+// RobotCommandBody is one command. The "basic" command set a Stackchan offers:
 //
 //	ping       {"id": "..."}                  answered by RobotPong
 //	nod, shake, home                           head gestures

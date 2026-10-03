@@ -1,4 +1,4 @@
-// Command fake-robot plays the Stack-chan side of the protocol so the server
+// Command fake-robot plays the Stackchan side of the protocol so the server
 // and dashboard can be tested without hardware: it registers, prints the
 // pairing URL, streams telemetry, answers the basic command set (including
 // ping), and emits an occasional robot event.
@@ -53,7 +53,7 @@ func main() {
 	url := strings.TrimRight(*serverURL, "/") + wire.ConnectPath
 
 	r := &robot{started: time.Now(), battery: 87, pitch: 45, brightness: 60, volume: 50, nfcOn: true, log: log}
-	// Reconnect with exponential backoff 1 s -> 30 s, like yolovm workers.
+	// Reconnect with exponential backoff 1 s -> 30 s.
 	backoff := time.Second
 	for {
 		start := time.Now()
