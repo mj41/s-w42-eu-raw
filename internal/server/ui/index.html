@@ -23,6 +23,8 @@
   h2 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
        margin: 16px 0 8px; }
   .sub { color: var(--muted); margin: 0 0 16px; }
+  .foot { color: var(--muted); font-size: 0.85rem; margin: 32px 0 8px; line-height: 1.6; }
+  .foot a { color: inherit; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px;
           padding: 16px; margin-bottom: 12px; }
   .head { display: flex; align-items: center; gap: 8px; }
@@ -94,8 +96,16 @@
       <button class="soft">Pair with code</button>
     </form>
     <p style="font-size:0.85rem">The robot code is the 8 characters under the QR code on its screen
-    (long-press the screen to show the QR again).</p>
+    (swipe up on the robot and tap <b>QR</b> to show it again).</p>
   </div>
+  <footer class="foot">
+    Open source, a proof of concept:
+    <a href="https://github.com/mj41/stackchan-server">stackchan-server</a> (this page) ·
+    the robot's <a href="https://github.com/mj41/StackChan/tree/embody-mj41">Embody Mode firmware</a> ·
+    <a href="https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/SETUP.md">set up a robot</a> ·
+    part of <a href="https://github.com/mj41/home-w42-eu">home-w42-eu</a> ·
+    <a href="https://github.com/sponsors/mj41">sponsor mj41</a>
+  </footer>
 </main>
 <script>
 "use strict";
