@@ -31,6 +31,7 @@ var uiFS embed.FS
 type Config struct {
 	RobotToken      string               // shared bearer token robots must present
 	RobotTokensFile string               // optional per-robot invite tokens (see invites.go); "" disables
+	TrustedProxies  int                  // reverse proxies in front that append to X-Forwarded-For (see clientIP); 0 ignores it
 	PublicURL       string               // base URL browsers use, e.g. http://192.168.1.10:8765
 	PairTTL         time.Duration        // lifetime of a pairing code
 	UIDir           string               // development: serve index.html from this directory instead of the embedded copy
@@ -46,15 +47,18 @@ type Server struct {
 	cfg Config
 	log *slog.Logger
 
-	mu       sync.Mutex
-	robots   map[string]*robotState     // by robot id; kept after disconnect
-	codes    map[string]pairCode        // one-time pairing codes
-	invites  *robotInvites              // per-robot invite tokens (nil: none)
-	sessions map[string]map[string]bool // browser session id -> paired robot ids
-	subs     map[*subscriber]struct{}   // open SSE streams
-	pings    map[string]pendingPing     // "robot/ping id" -> in-flight ping
-	media    map[*mediaSub]struct{}     // browser media sockets
-	joins    map[string]*joinRequest    // pending join requests by id (join.go)
+	mu      sync.Mutex
+	robots  map[string]*robotState // by robot id; kept after disconnect
+	codes   map[string]pairCode    // one-time pairing codes
+	invites *robotInvites          // per-robot invite tokens (nil: none)
+
+	robotFails *failLimiter               // failed robot logins per address
+	pairFails  *failLimiter               // wrong pairing codes per address
+	sessions   map[string]map[string]bool // browser session id -> paired robot ids
+	subs       map[*subscriber]struct{}   // open SSE streams
+	pings      map[string]pendingPing     // "robot/ping id" -> in-flight ping
+	media      map[*mediaSub]struct{}     // browser media sockets
+	joins      map[string]*joinRequest    // pending join requests by id (join.go)
 	// last join request per client IP, for rate limiting
 	joinLastByIP map[string]time.Time
 
@@ -137,6 +141,8 @@ func New(cfg Config) *Server {
 		saveNow:  make(chan struct{}, 1),
 
 		joinLastByIP: map[string]time.Time{},
+		robotFails:   newFailLimiter(maxRobotAuthFails, failWindow),
+		pairFails:    newFailLimiter(maxPairFails, failWindow),
 	}
 	if cfg.RobotTokensFile != "" {
 		s.invites = newRobotInvites(cfg.RobotTokensFile)

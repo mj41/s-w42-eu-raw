@@ -37,9 +37,10 @@ type outMsg struct {
 }
 
 type robotConn struct {
-	id   string
-	ws   *websocket.Conn
-	send chan outMsg
+	id     string
+	ws     *websocket.Conn
+	send   chan outMsg
+	limits *guestLimits // invited robots only; nil for the owner's robots
 
 	closeOnce sync.Once
 	done      chan struct{}
@@ -74,6 +75,11 @@ func (c *robotConn) queue(m outMsg) bool {
 }
 
 func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
+	ip, now := s.clientIP(r), time.Now()
+	if s.robotFails.blocked(ip, now) {
+		http.Error(w, "too many failed logins from this address, try again later", http.StatusTooManyRequests)
+		return
+	}
 	token, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	id := wire.DeviceID(r.Header)
 	if !robotIDPattern.MatchString(id) {
@@ -82,7 +88,8 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	ok, guest := s.robotAuth(id, token)
 	if !ok {
-		s.log.Info("robot unauthorized", "robot", id, "remote", clientIP(r))
+		s.robotFails.fail(ip, now)
+		s.log.Info("robot unauthorized", "robot", id, "remote", ip)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -94,11 +101,14 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	ws.SetReadLimit(maxMessageBytes)
 	c := &robotConn{id: id, ws: ws, send: make(chan outMsg, 32), done: make(chan struct{})}
+	if guest {
+		c.limits = newGuestLimits(now)
+	}
 	defer c.close()
 
 	reg, reason := readRegister(ws, id)
 	if reason != "" {
-		s.log.Warn("robot rejected", "robot", id, "reason", reason, "remote", clientIP(r))
+		s.log.Warn("robot rejected", "robot", id, "reason", reason, "remote", s.clientIP(r))
 		if f, err := wire.Marshal(wire.KindRejected, wire.Meta{}, wire.RejectedBody{Reason: reason}); err == nil {
 			ws.SetWriteDeadline(time.Now().Add(writeWait))
 			ws.WriteMessage(websocket.TextMessage, f)
@@ -109,7 +119,7 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 	s.attach(c, reg)
 	defer s.detach(c)
 	s.log.Info("robot connected", "robot", id, "model", reg.Capabilities.Model,
-		"firmware", reg.Capabilities.Firmware, "guest", guest, "remote", clientIP(r))
+		"firmware", reg.Capabilities.Firmware, "guest", guest, "remote", s.clientIP(r))
 	defer s.log.Info("robot disconnected", "robot", id)
 
 	if f, err := wire.Marshal(wire.KindAccepted, wire.Meta{WorkerID: id, SessionID: newCode()}, nil); err == nil {
@@ -218,6 +228,13 @@ func (s *Server) readLoop(c *robotConn) {
 			return
 		}
 		resetDeadline()
+		if c.limits != nil && !c.limits.allow(len(data), time.Now()) {
+			s.log.Warn("invited robot over its limits, disconnecting", "robot", c.id)
+			c.ws.WriteControl(websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "over the limits for invited robots"),
+				time.Now().Add(writeWait))
+			return
+		}
 		if kind == websocket.BinaryMessage {
 			s.relayMedia(c.id, data)
 			continue
@@ -267,10 +284,3 @@ func (s *Server) handleRobotFrame(c *robotConn, f wire.Frame) {
 
 // clientIP is the robot's address for logs: behind the TLS gateway RemoteAddr
 // is the gateway, and the real client is the first X-Forwarded-For entry.
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		first, _, _ := strings.Cut(xff, ",")
-		return strings.TrimSpace(first)
-	}
-	return r.RemoteAddr
-}

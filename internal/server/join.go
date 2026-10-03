@@ -3,7 +3,6 @@ package server
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -35,10 +34,7 @@ type joinRequest struct {
 // A browser has at most one pending request; asking again returns it.
 func (s *Server) handleJoinRequest(w http.ResponseWriter, r *http.Request) {
 	session := s.session(w, r)
-	ip := clientIP(r)
-	if host, _, err := net.SplitHostPort(ip); err == nil {
-		ip = host // RemoteAddr has a port; rate limits are per address
-	}
+	ip := s.clientIP(r) // rate limits are per address
 	now := time.Now()
 
 	s.mu.Lock()

@@ -16,7 +16,7 @@
 | State | in memory, plus a JSON snapshot on restart; one instance only | a crash or a deploy loses live state |
 | Audio | raw PCM, about 48 KB/s | too heavy for mobile networks |
 | Quality checks | tests run on the developer's machine; CI only builds release images | the v0.2.0 image build broke without anyone noticing before the tag |
-| Abuse | "ask a paired phone" requests are rate-limited per address; pairing codes and connections are not | a public instance needs more |
+| Abuse | join requests, failed robot logins and wrong pairing codes are limited per address; invited robots have send budgets; browsers' streams are not limited yet | a public instance needs more |
 
 ## Stages
 
@@ -73,7 +73,10 @@ nothing else, and can read afterwards what was used.
   owner's own server.
 - **Compressed audio** (Opus) for the microphone and the speaker.
 - **Abuse limits:** connection and pairing rate limits per address, size and frequency
-  limits on every message, and short log retention on the public instance.
+  limits on every message, and short log retention on the public instance. *Started
+  2026-10-03:* failed robot logins and wrong pairing codes are limited per address (with
+  `-trusted-proxies` so a forged `X-Forwarded-For` cannot dodge it), and invited robots
+  have message and byte budgets.
 - **An external security review** of the protocol and the server.
 
 **Done when:** the public instance can be offered to people we do not know without

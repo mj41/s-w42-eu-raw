@@ -48,6 +48,7 @@ func main() {
 		tlsCert   = flag.String("tls-cert", defaultConfigFile("tls-cert.pem"), "TLS certificate for -tls-listen; a self-signed one is created if missing")
 		tlsKey    = flag.String("tls-key", defaultConfigFile("tls-key.pem"), "TLS key for -tls-listen")
 		invites   = flag.String("robot-tokens-file", "", "per-robot invite tokens: lines \"<robot id> <sha256 of its token>\", read again when changed (\"\" disables; see `stackchan-server invite`)")
+		proxies   = flag.Int("trusted-proxies", 0, "reverse proxies in front of this server that append the client address to X-Forwarded-For (1 behind one gateway); 0 ignores the header, which clients can forge")
 		offers    offerFlags
 	)
 	flag.Var(&offers, "offer", "offer robots another server: name=wss://host[,tokenfile] (repeatable; the token file holds that server's robot token)")
@@ -92,6 +93,7 @@ func main() {
 		UIDir:           *uiDir,
 		StateFile:       *stateFile,
 		RobotTokensFile: *invites,
+		TrustedProxies:  *proxies,
 		HTTPSPort:       httpsPort,
 		Offers:          offers,
 		Log:             log,

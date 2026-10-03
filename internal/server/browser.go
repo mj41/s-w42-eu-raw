@@ -62,9 +62,15 @@ func (s *Server) emojiFiles() http.Handler {
 func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	session := s.session(w, r)
 	code := strings.ToUpper(strings.NewReplacer("-", "", " ", "").Replace(r.URL.Query().Get("code")))
+	ip, now := s.clientIP(r), time.Now()
+	if s.pairFails.blocked(ip, now) {
+		http.Error(w, "too many wrong codes from this address, try again later", http.StatusTooManyRequests)
+		return
+	}
 
 	robotID, viewers, conn, ok := s.redeem(session, code)
 	if !ok {
+		s.pairFails.fail(ip, now)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprint(w, `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">`+

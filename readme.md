@@ -66,6 +66,8 @@ go run ./cmd/fake-robot                    # simulated robot, in a second termin
 - `-tls-listen :8766` also serves the dashboard over HTTPS, for the phone's microphone ("Talk"). Without `-tls-cert`/`-tls-key` it creates a self-signed certificate for localhost, this host name and every local IP, and keeps it in `~/.config/stackchan-server/` so a phone accepts it only once. Robots stay on `-listen`. The pairing cookie is shared by both ports (same host).
 - `-offer name=wss://host[,tokenfile]` (repeatable) offers robots other servers they may switch to; with a token file, the robot also gets that server's robot token. Offers are voluntary: a server decides where its robots may go, and the robot owner can also add servers by hand. Offers go only to robots with the shared token, never to invited robots (below).
 - `-robot-tokens-file <file>`: other people's robots, each with its own invite token (see "Other people's robots" below). Off by default.
+- `-trusted-proxies 1` behind one reverse proxy that appends the client address to `X-Forwarded-For` (Envoy, nginx with `$proxy_add_x_forwarded_for`). The default 0 ignores that header, because clients can forge it. Limits and logs use the address.
+- **Limits** (always on): 20 failed robot logins per address in 10 minutes, then that address gets HTTP 429 for every login, right token included; 20 wrong pairing codes per address in 10 minutes, then 429; invited robots may send 300 messages/s and 512 KB/s on average (bursts of 1000 messages and 4 MB), and are disconnected above that. The owner's robots are not limited.
 - `-ui-dir internal/server/ui` serves the dashboard from disk on every request (development). UI edits then need only a page reload.
 - Open the dashboard with the same host as the QR code (e.g. `http://192.168.1.10:8765/`, not `localhost`). The pairing cookie belongs to that host.
 - Run `go test -race ./...` for the tests.
@@ -91,8 +93,9 @@ token>`) goes into the file you pass as `-robot-tokens-file`; the file holds no 
 - Invited robots get no server offers (`-offer`), which carry other servers' tokens.
 - Browsers still pair only by the code on the robot's own screen, so an invite gives a robot
   a place on the server, not anyone access to it.
-- Still to do (see the [roadmap](docs/roadmap.md)): per-robot limits on a public server, and
-  end-to-end encryption through it.
+- Invited robots have send limits (above, "Limits").
+- Still to do (see the [roadmap](docs/roadmap.md)): end-to-end encryption through a public
+  server.
 
 ## Running in a container
 
