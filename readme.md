@@ -6,7 +6,9 @@ Relay between M5Stack Stack-chan robots and web browsers for **Embody Mode**. It
 - **Browser:** scans the robot's QR code to pair, then gets a live dashboard.
 - **Server:** one Go binary with the web page built in. State lives in memory and is saved to a JSON file, so pairings survive a restart.
 
-The robot side is the Embody Mode app in the StackChan firmware fork `mj41/StackChan` (branch `embody-mj41`, `firmware/main/apps/app_embody_mode/`).
+The robot side is the [Embody Mode app](https://github.com/mj41/StackChan/tree/embody-mj41/firmware/main/apps/app_embody_mode) in the StackChan firmware fork [mj41/StackChan](https://github.com/mj41/StackChan/tree/embody-mj41) (branch `embody-mj41`). Setting up a robot with this server, from building the firmware to pairing a phone: [SETUP.md](https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/SETUP.md).
+
+Part of [home-w42-eu](https://github.com/mj41/home-w42-eu), a local first, privacy first platform for a home: this repo holds the Go implementation of its device wire protocol (the `wire` package), which the other servers use too.
 
 ## Dashboard
 
@@ -83,7 +85,7 @@ What any host needs:
 
 ## Protocol
 
-This is the device wire protocol v1. Its reference specification is `docs/wire-protocol.md` in the `home-w42-eu` repo; the tables below are this server's view of it.
+This is the device wire protocol v1. Its reference specification is [wire-protocol.md](https://github.com/mj41/home-w42-eu/blob/main/docs/wire-protocol.md) in home-w42-eu; the tables below are this server's view of it.
 
 **Connect:** `ws://<server>/api/devices/connect` (firmware before 2026-10-02 uses `/api/workers/connect`, still served) with these headers:
 
@@ -140,13 +142,13 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 | `sprite_hide`, `sprite_clear` | `{"id"}` / none: remove one sprite / all |
 | `picture` | `{"asset": "pet/dream.jpg"}`: a stored picture instead of the face (`face` ends it) |
 | `play` | `{"asset": "snd/hello.wav", "volume": 0..100}`: a stored WAV (16-bit PCM, mono or stereo, 4-48 kHz), streamed from the file so any length works; `sound_done` {asset} at the end, `sound_error` {asset, reason}; `play_stop` ends it |
-| `touch_stream`, `imu_stream`, `light_stream` | `{"on": bool}`: sent by the server while a browser has `?touch=1` / `?imu=1` / `?light=1` open (an app server such as stackchan-pet may send `light_stream` itself) |
+| `touch_stream`, `imu_stream`, `light_stream` | `{"on": bool}`: sent by the server while a browser has `?touch=1` / `?imu=1` / `?light=1` open (an app server such as [stackchan-pet](https://github.com/mj41/stackchan-pet) may send `light_stream` itself) |
 | `server_add` | `{"url": "ws://…" or "wss://…", "name", "token"}`: add (or update) an entry in the robot's server list, stored on the robot |
 | `server_remove`, `server_default`, `server_switch` | `{"server": url or name}`: remove an entry (not the built-in or current one), make it the one used at start (`""` = no default: the robot starts as a chooser), or switch to it now (the robot leaves this server) |
 | `proximity` | `{"on": bool}`: the proximity sensor, whose IR LED next to the camera pulses ~10×/s. Off stops the LED and the approach events; light and auto-brightness keep working. Telemetry `proximity_on` |
 | `power_led` | `{"mode": "on\|off\|blink\|fast\|charging"}`: the red power LED; `charging` hands it back to the charger |
 | `nfc` | `{"on": bool}`: NFC tag polling, on by default. Listed only when the robot found its reader |
-| `car_enable` | `{"on": bool, "board"?: "v1\|v2\|both"}`: the optional TPBot car over BLE (firmware `CONFIG_STACKCHAN_EMBODY_CAR`). Off by default and kept on the robot. While on, the robot registers again with the `car_*` commands and telemetry listed in sbot's readme ("Car capability", `../sbot`) plus `car_connected`, and sends `car_connected` / `car_disconnected` events. This dashboard has no car controls; sbot has |
+| `car_enable` | `{"on": bool, "board"?: "v1\|v2\|both"}`: the optional TPBot car (micro:bit with [tpbot-ble](https://github.com/mj41/tpbot-ble)) over BLE (firmware `CONFIG_STACKCHAN_EMBODY_CAR`). Off by default and kept on the robot. While on, the robot registers again with the `car_*` commands and telemetry listed in sbot's readme, [Car capability](https://github.com/mj41/sbot#car-capability), plus `car_connected`, and sends `car_connected` / `car_disconnected` events. This dashboard has no car controls; sbot has |
 
 ### Binary messages
 
@@ -190,6 +192,13 @@ A prototype, in daily use with one robot on a home network since 2026-09-29. It 
 yet safe on untrusted networks: one shared robot token, no per-person permissions, plain
 `ws://` on the LAN. The way to a v1, in stages with clear goals, is in
 [docs/roadmap.md](docs/roadmap.md).
+
+## Related projects
+
+- [StackChan fork, branch `embody-mj41`](https://github.com/mj41/StackChan/tree/embody-mj41): the robot's firmware, Embody Mode.
+- Other app servers the robot can switch to, on the same `wire` package: [stackchan-pet](https://github.com/mj41/stackchan-pet) (a Tamagotchi for kids) and [sbot](https://github.com/mj41/sbot) (a cockpit for the robot and a TPBot car, growing into the home node).
+- [home-w42-eu](https://github.com/mj41/home-w42-eu): the platform, its use cases, architecture and the wire protocol's reference. All the repos: [The repos today](https://github.com/mj41/home-w42-eu#the-repos-today).
+- [stackchan-mj](https://github.com/mj41/stackchan-mj): working notes, scripts to run this server in the background on a LAN, the robot's hardware coverage and the trust design behind the [roadmap](docs/roadmap.md).
 
 ## Credits
 
