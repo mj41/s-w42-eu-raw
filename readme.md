@@ -141,9 +141,12 @@ cable is the proof of ownership, like scanning its QR code.
 Plug the robot in (the USB-C port on its head, a data cable), sign in, press **Set up my
 robot** and pick the "USB JTAG/serial debug unit". The page then:
 
-1. saves a **backup of the robot's current firmware** the first time (the whole flash as one
-   file for address 0x0, downloaded to your computer; erased blocks are skipped, so it takes
-   about a minute), and the robot keeps its identity and SHA-256,
+1. saves a **backup of the robot's current firmware** ("Back up the current firmware first", on
+   by default): the whole flash as one file for address 0x0, downloaded by the browser (e.g. to
+   `~/Downloads`); erased blocks are skipped, so it takes about two minutes. The first backup is
+   the robot's **original**: the robot keeps its identity and SHA-256, and the page can put it
+   back. Later ones (`…-backup-<date>-<time>.bin`) are the firmware it had until then, restored
+   from a terminal (`esptool.py write_flash 0x0 <file>`),
 2. installs the official Embody Mode firmware (Web Serial and
    [esptool-js](https://github.com/espressif/esptool-js), checked against the SHA-256 in the
    manifest; the robot's settings stay),

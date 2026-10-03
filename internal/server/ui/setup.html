@@ -80,6 +80,7 @@
   <section class="card" id="go">
     <button class="big" id="start">Set up my robot</button>
     <div class="startrow">
+      <label id="backupcheck"><input type="checkbox" id="backup" checked> Back up the current firmware first</label>
       <label><input type="checkbox" id="autostart"> Start Embody Mode when the robot turns on</label>
       <label id="appbox" hidden>App <select id="app"></select></label>
     </div>
@@ -104,8 +105,8 @@
   </section>
 
   <section class="card" id="backupbox" hidden>
-    <h2>Backup of the original firmware</h2>
-    <p>Keep this file: with it, the robot can go back to the firmware it had (Options, Firmware,
+    <h2 id="backuptitle">Backup of the original firmware</h2>
+    <p id="backuptext">Keep this file: with it, the robot can go back to the firmware it had (Options, Firmware,
     "Restore the original firmware"). It also holds the robot's settings from before, such as
     Wi-Fi passwords, so keep it private.</p>
     <p><a id="backuplink">backup</a></p>
@@ -122,8 +123,6 @@
     <h2>Firmware</h2>
     <label class="radio"><input type="radio" name="fw" value="latest" checked> <span>Install the latest
       official Embody Mode <span class="muted" id="fwversion"></span> (recommended)</span></label>
-    <label class="check" id="backupcheck"><input type="checkbox" id="backup" checked> <span>First save a backup
-      of the robot's current firmware, to go back to it later (the first time only; about a minute)</span></label>
     <label class="radio"><input type="radio" name="fw" value="keep"> <span>Keep the robot's firmware
       (it must already have Embody Mode with setup over USB)</span></label>
     <label class="radio"><input type="radio" name="fw" value="restore"> <span>Restore the original firmware
@@ -577,8 +576,9 @@ $("start").onclick = async () => {
     if (fw === "latest") {
       const files = await firmwareFiles();
       session = await installer(port);
-      if (backup && !before?.original) {
+      if (backup) { // every time it is ticked; the first one is the robot's original
         step(s++);
+        const first = !before?.original;
         const reconnect = async (old) => {
           try { await old.transport.disconnect(); } catch {}
           await sleep(1000);
@@ -586,11 +586,16 @@ $("start").onclick = async () => {
         };
         const { image } = await readBackup(session, reconnect);
         const mac = (await session.loader.chip.readMac(session.loader)).replace(/:/g, "").toLowerCase();
-        const day = new Date().toISOString().slice(0, 10);
-        original = { ...identify(image), sha256: await sha256(image), size: image.length, saved: day };
-        offerDownload(new Blob([image]), `stackchan-${mac}-original-${day}.bin`);
-      } else if (backup) {
-        step(s++); // backed up at an earlier setup: the robot keeps the record
+        const now = new Date(), day = now.toISOString().slice(0, 10);
+        const stamp = `${day}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
+        if (first) original = { ...identify(image), sha256: await sha256(image), size: image.length, saved: day };
+        else {
+          $("backuptitle").textContent = "Backup of the robot's previous firmware";
+          $("backuptext").textContent = "The firmware the robot had until now, with its settings (Wi-Fi passwords too: keep it private). " +
+            "Put it back from a terminal: esptool.py write_flash 0x0 <file>. The page itself restores only the original firmware, " +
+            `saved ${before.original.saved || "at the first setup"}.`;
+        }
+        offerDownload(new Blob([image]), `stackchan-${mac}-${first ? "original" : "backup"}-${stamp}.bin`);
       }
       step(s++);
       await writeFlash(session.loader, files);
