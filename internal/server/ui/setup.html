@@ -34,7 +34,8 @@
   input[type=text], input[type=password], input[type=url] { font: inherit; width: 100%; padding: 9px 12px; border-radius: 10px;
     border: 1px solid var(--border); background: var(--bg); color: var(--text); margin: 4px 0 10px; }
   label { display: block; font-size: 0.9rem; color: var(--muted); }
-  label.radio { display: flex; gap: 8px; align-items: flex-start; color: var(--text); margin: 6px 0; font-size: 0.95rem; }
+  label.radio, label.check { display: flex; gap: 8px; align-items: flex-start; color: var(--text); margin: 6px 0; font-size: 0.95rem; }
+  label.check { margin-left: 26px; color: var(--muted); }
   details summary { cursor: pointer; font-weight: 600; }
   .muted { color: var(--muted); font-size: 0.9rem; }
   ol.steps { margin: 0; padding-left: 22px; }
@@ -89,7 +90,15 @@
   <section class="card" id="done" hidden>
     <h2>Done</h2>
     <p id="donetext"></p>
-    <a class="button" href="/">Open the dashboard</a>
+    <a class="button" href="/" id="donelink">Open the dashboard</a>
+  </section>
+
+  <section class="card" id="backupbox" hidden>
+    <h2>Backup of the original firmware</h2>
+    <p>Keep this file: with it, the robot can go back to the firmware it had (Options, Firmware,
+    "Restore the original firmware"). It also holds the robot's settings from before, such as
+    Wi-Fi passwords, so keep it private.</p>
+    <p><a id="backuplink">backup</a></p>
   </section>
 
   <details class="card" id="options">
@@ -103,8 +112,13 @@
     <h2>Firmware</h2>
     <label class="radio"><input type="radio" name="fw" value="latest" checked> <span>Install the latest
       official Embody Mode <span class="muted" id="fwversion"></span> (recommended)</span></label>
+    <label class="check" id="backupcheck"><input type="checkbox" id="backup" checked> <span>First save a backup
+      of the robot's current firmware, to go back to it later (the first time only; about a minute)</span></label>
     <label class="radio"><input type="radio" name="fw" value="keep"> <span>Keep the robot's firmware
       (it must already have Embody Mode with setup over USB)</span></label>
+    <label class="radio"><input type="radio" name="fw" value="restore"> <span>Restore the original firmware
+      from the backup file a setup saved</span></label>
+    <input type="file" id="restorefile" accept=".bin" hidden>
 
     <h2>Server</h2>
     <label class="radio" id="herebox"><input type="radio" name="srv" value="here" checked> <span>This server
@@ -141,12 +155,17 @@ let me = { signed_in: false, sign_in: false };
 
 // --- the page ---
 const radio = (name) => document.querySelector(`input[name=${name}]:checked`).value;
+for (const r of document.querySelectorAll("input[name=fw]")) r.onchange = () => {
+  $("restorefile").hidden = radio("fw") !== "restore";
+  $("backupcheck").hidden = radio("fw") !== "latest";
+  refresh();
+};
 for (const r of document.querySelectorAll("input[name=srv]")) r.onchange = () => { $("ownsrv").hidden = radio("srv") !== "own"; refresh(); };
 
 function refresh() {
-  const own = radio("srv") === "own";
-  $("signin").hidden = own || me.signed_in || !me.sign_in;
-  $("start").disabled = !("serial" in navigator) || (!own && !me.signed_in);
+  const free = radio("srv") === "own" || radio("fw") === "restore"; // no account needed
+  $("signin").hidden = free || me.signed_in || !me.sign_in;
+  $("start").disabled = !("serial" in navigator) || (!free && !me.signed_in);
 }
 
 async function loadMe() {
@@ -232,19 +251,22 @@ class Robot {
 }
 
 // --- firmware ---
+const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, "0")).join("");
+const sha256 = async (data) => hex(await crypto.subtle.digest("SHA-256", data));
+
 async function firmwareFiles() {
   const m = await fetch("/firmware/manifest.json").then((r) => { if (!r.ok) throw new Error("This server has no firmware to install: choose \"Keep the robot's firmware\" in Options."); return r.json(); });
   const files = [];
   for (const p of m.parts) {
     const data = new Uint8Array(await fetch("/firmware/" + p.path).then((r) => { if (!r.ok) throw new Error("download " + p.path); return r.arrayBuffer(); }));
-    const sum = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", data)), (b) => b.toString(16).padStart(2, "0")).join("");
-    if (sum !== p.sha256) throw new Error(`${p.path}: the download is damaged (checksum), try again`);
+    if (await sha256(data) !== p.sha256) throw new Error(`${p.path}: the download is damaged (checksum), try again`);
     files.push({ data, address: p.offset });
   }
   return files;
 }
 
-async function flash(port, files) {
+// The installer (esptool-js) on the robot's USB port, for one session: backup, then write.
+async function installer(port) {
   const transport = new Transport(port, false);
   const loader = new ESPLoader({ transport, baudrate: 921600, terminal: { clean() {}, writeLine() {}, write() {} } });
   let timer;
@@ -252,39 +274,102 @@ async function flash(port, files) {
     "The robot does not answer the installer. Hold its reset button until the green LED lights up, then press the button here again.")), 30000); })])
     .finally(() => clearTimeout(timer))
     .catch(async (e) => { try { await transport.disconnect(); } catch {} throw e; });
-  if (!/ESP32-S3/i.test(chip)) throw new Error(`This is ${chip}, not a Stackchan (ESP32-S3).`);
+  if (!/ESP32-S3/i.test(chip)) { await transport.disconnect(); throw new Error(`This is ${chip}, not a Stackchan (ESP32-S3).`); }
+  return { loader, transport };
+}
+
+async function writeFlash(loader, files) {
   $("bar").hidden = false;
   const total = files.reduce((n, f) => n + f.data.length, 0);
-  let before = 0;
   await loader.writeFlash({
     fileArray: files, flashMode: "keep", flashFreq: "keep", flashSize: "keep", eraseAll: false, compress: true,
     reportProgress: (i, written) => {
-      before = files.slice(0, i).reduce((n, f) => n + f.data.length, 0);
-      $("bar").value = (before + written) / total;
+      $("bar").value = (files.slice(0, i).reduce((n, f) => n + f.data.length, 0) + written) / total;
     },
   });
   $("bar").hidden = true;
   // No loader.after("hard_reset"): esptool-js 0.7.0 only drops RTS without raising it first,
   // which leaves the chip in the flasher; Robot.open({ reset: true }) restarts it instead.
-  await transport.disconnect();
+}
+
+// --- backup of the robot's current firmware ---
+// The whole 16 MB flash as one image for address 0x0 (esptool can write it too), read
+// sparsely: the robot hashes each 64 KB block, and erased blocks (all 0xFF) are not read.
+const FLASH_SIZE = 16 * 1024 * 1024, BLOCK = 64 * 1024;
+const ERASED_MD5 = "ecb99e6ffea7be1e5419350f725da86b"; // MD5 of 64 KB of 0xFF
+
+async function readBackup(loader) {
+  const image = new Uint8Array(FLASH_SIZE).fill(0xff);
+  const used = [];
+  $("bar").hidden = false;
+  for (let a = 0; a < FLASH_SIZE; a += BLOCK) {
+    if ((await loader.flashMd5sum(a, BLOCK)).toLowerCase() !== ERASED_MD5) used.push(a);
+    $("bar").value = 0.1 * (a + BLOCK) / FLASH_SIZE;
+  }
+  for (let i = 0; i < used.length; i++) {
+    image.set(await loader.readFlash(used[i], BLOCK), used[i]);
+    $("bar").value = 0.1 + 0.9 * (i + 1) / used.length;
+  }
+  $("bar").hidden = true;
+  return image;
+}
+
+// What the image holds: the running app's description (esp_app_desc_t), found through the
+// partition table (0x8000) and the OTA data.
+function identify(image) {
+  const dv = new DataView(image.buffer), td = new TextDecoder();
+  const str = (o, n) => td.decode(image.subarray(o, o + n)).replace(/\0.*$/s, "");
+  const apps = [];
+  let otadata = -1;
+  for (let o = 0x8000; o < 0x9000 && dv.getUint16(o, true) === 0x50aa; o += 32) {
+    const type = image[o + 2], sub = image[o + 3], offset = dv.getUint32(o + 4, true);
+    if (type === 0) apps.push({ sub, offset });
+    if (type === 1 && sub === 0) otadata = offset;
+  }
+  let app = apps.find((a) => a.sub === 0x10) || apps[0]; // ota_0, or the factory app
+  if (otadata >= 0) { // the newest valid OTA entry picks the slot
+    const seqs = [0, 0x1000].map((d) => dv.getUint32(otadata + d, true)).filter((s) => s && s !== 0xffffffff);
+    if (seqs.length) app = apps.find((a) => a.sub === 0x10 + ((Math.max(...seqs) - 1) % 2)) || app;
+  }
+  if (!app || dv.getUint32(app.offset + 32, true) !== 0xabcd5432) return {};
+  const d = app.offset + 32;
+  return { project: str(d + 48, 32), version: str(d + 16, 32), built: `${str(d + 96, 16)} ${str(d + 80, 16)}`,
+    idf: str(d + 112, 32), elf_sha256: hex(image.subarray(d + 144, d + 176)) };
+}
+
+function offerDownload(blob, name) {
+  const a = $("backuplink");
+  if (a.href) URL.revokeObjectURL(a.href);
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.textContent = name;
+  $("backupbox").hidden = false;
+  a.click();
 }
 
 // --- the button ---
 $("start").onclick = async () => {
   $("error").textContent = "";
   $("done").hidden = true;
-  const fw = radio("fw"), own = radio("srv") === "own";
+  const fw = radio("fw"), own = radio("srv") === "own", restore = fw === "restore";
   const ownURL = $("srvurl").value.trim(), ownToken = $("srvtoken").value.trim();
-  if (own) { // checked before anything happens to the robot
-    let bad = "";
+  let bad = "";
+  if (restore && !$("restorefile").files[0]) bad = "Choose the backup file to restore (Options, Firmware).";
+  else if (own && !restore) { // checked before anything happens to the robot
     if (!/^wss?:\/\/[^/]/.test(ownURL)) bad = "Own server: give its URL, starting with ws:// or wss://.";
     else if (/^wss?:\/\/(localhost|127\.|\[::1\])/i.test(ownURL)) bad = "Own server: localhost on the robot is the robot itself. Use the computer's address in your network, e.g. ws://192.168.1.10:8765.";
     else if (!ownToken) bad = "Own server: give its robot token (the content of its robot-token file). Only a server with your account (\"This server\") makes one for you.";
-    if (bad) { $("options").open = true; $("progressbox").hidden = false; $("steps").replaceChildren(); $("error").textContent = bad; return; }
   }
+  if (bad) { $("options").open = true; $("progressbox").hidden = false; $("steps").replaceChildren(); $("error").textContent = bad; return; }
+
+  const backup = fw === "latest" && $("backup").checked;
   const names = ["Connect to the robot"];
-  if (fw !== "keep") names.push("Install the firmware");
-  names.push("Read the robot's id", own ? "Use your server" : "Add the robot to your account", "Write the settings", "Restart into Embody Mode");
+  if (restore) names.push("Check the backup", "Restore the original firmware", "Restart");
+  else {
+    if (backup) names.push("Back up the current firmware");
+    if (fw === "latest") names.push("Install the firmware");
+    names.push("Read the robot's id", own ? "Use your server" : "Add the robot to your account", "Write the settings", "Restart into Embody Mode");
+  }
   let port;
   try {
     port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a }] });
@@ -296,13 +381,57 @@ $("start").onclick = async () => {
   $("start").textContent = "Setting up…";
   $("progressbox").hidden = false;
   steps(names);
-  let s = 0, robot;
+  let s = 0, robot, session;
   try {
     step(s++);
-    if (fw !== "keep") {
-      const files = await firmwareFiles();
+    // Ask the firmware first: Embody Mode answers, with the record of the robot's original
+    // firmware if a setup made a backup before; any other firmware stays silent.
+    let before = null;
+    if (backup || restore) {
+      robot = new Robot(port);
+      await robot.open({ reset: true });
+      before = await robot.ask({ op: "hello" }, restore ? 40000 : 10000).catch(() => null);
+      await robot.close();
+      robot = null;
+    }
+    if (restore) {
       step(s++);
-      await flash(port, files);
+      if (!before?.original?.sha256) throw new Error("This robot has no record of its original firmware, so this page cannot check the file. Restore it from a terminal: esptool.py write_flash 0x0 <backup file>.");
+      const data = new Uint8Array(await $("restorefile").files[0].arrayBuffer());
+      if (data.length !== FLASH_SIZE || await sha256(data) !== before.original.sha256) throw new Error("This file is not the backup of this robot's original firmware (its checksum differs).");
+      step(s++);
+      session = await installer(port);
+      await writeFlash(session.loader, [{ data, address: 0 }]);
+      await session.transport.disconnect();
+      session = null;
+      step(s++);
+      robot = new Robot(port);
+      await robot.open({ reset: true });
+      step(s);
+      $("donetext").textContent = `The robot restarts with its original firmware (${before.original.project || "?"} ${before.original.version || ""}).`;
+      $("donelink").hidden = true;
+      $("done").hidden = false;
+      $("progressbox").hidden = true;
+      return;
+    }
+    let original = null;
+    if (fw === "latest") {
+      const files = await firmwareFiles();
+      session = await installer(port);
+      if (backup && !before?.original) {
+        step(s++);
+        const image = await readBackup(session.loader);
+        const mac = (await session.loader.chip.readMac(session.loader)).replace(/:/g, "").toLowerCase();
+        const day = new Date().toISOString().slice(0, 10);
+        original = { ...identify(image), sha256: await sha256(image), size: image.length, saved: day };
+        offerDownload(new Blob([image]), `stackchan-${mac}-original-${day}.bin`);
+      } else if (backup) {
+        step(s++); // backed up at an earlier setup: the robot keeps the record
+      }
+      step(s++);
+      await writeFlash(session.loader, files);
+      await session.transport.disconnect();
+      session = null;
     }
     step(s++);
     robot = new Robot(port);
@@ -323,6 +452,7 @@ $("start").onclick = async () => {
     }
     step(s++);
     const req = { op: "provision", server, default: true, autostart: true };
+    if (original) req.original = original;
     if ($("ssid").value.trim()) req.wifi = { ssid: $("ssid").value.trim(), password: $("wifipass").value };
     const p = await robot.ask(req, 15000);
     if (!p.ok) throw new Error("The robot refused the settings: " + (p.error || "unknown"));
@@ -332,11 +462,13 @@ $("start").onclick = async () => {
     $("donetext").textContent = (req.wifi ? "Your robot restarts and connects to Wi-Fi “" + req.wifi.ssid + "”" :
       "Your robot restarts. If it does not know your Wi-Fi yet, it opens a hotspot: connect your phone to it and choose your network") +
       (own ? `, then to ${server.name}.` : `, then to ${server.name}. It is private: open the dashboard here, signed in, to see it.`);
+    $("donelink").hidden = false;
     $("done").hidden = false;
     $("progressbox").hidden = true;
   } catch (e) {
     $("error").textContent = e.message || String(e);
   } finally {
+    if (session) try { await session.transport.disconnect(); } catch {}
     if (robot) await robot.close(); else try { await port.close(); } catch {}
     $("start").disabled = false;
     $("start").textContent = "Set up my robot";

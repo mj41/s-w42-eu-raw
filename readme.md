@@ -141,17 +141,22 @@ cable is the proof of ownership, like scanning its QR code.
 Plug the robot in (the USB-C port on its head, a data cable), sign in, press **Set up my
 robot** and pick the "USB JTAG/serial debug unit". The page then:
 
-1. installs the official Embody Mode firmware (Web Serial and
+1. saves a **backup of the robot's current firmware** the first time (the whole flash as one
+   file for address 0x0, downloaded to your computer; erased blocks are skipped, so it takes
+   about a minute), and the robot keeps its identity and SHA-256,
+2. installs the official Embody Mode firmware (Web Serial and
    [esptool-js](https://github.com/espressif/esptool-js), checked against the SHA-256 in the
    manifest; the robot's settings stay),
-2. reads the robot id over the cable and adds the robot to your account with a new token,
-3. writes this server, the token and, if you give it, your Wi-Fi into the robot, sets
+3. reads the robot id over the cable and adds the robot to your account with a new token,
+4. writes this server, the token and, if you give it, your Wi-Fi into the robot, sets
    autostart, and restarts it into Embody Mode,
-4. after which the robot connects. It is private to you: open the dashboard on this server,
+5. after which the robot connects. It is private to you: open the dashboard on this server,
    signed in, and it is there (or scan the QR code on its screen with a signed-in phone).
 
 **Options** on the same page: Wi-Fi (sent only to the robot, never to the server), keep the
-robot's firmware (e.g. your own build, flashed from a terminal), and your own server (its URL
+robot's firmware (e.g. your own build, flashed from a terminal), **restore the original
+firmware** from the backup file (only the file whose SHA-256 the robot recorded; or from a
+terminal, `esptool.py write_flash 0x0 <file>`), and your own server (its URL
 and robot token) instead of this one, which works without sign-in too, e.g.
 `http://localhost:8765/setup` for a server on your laptop. The page installs only the official
 firmware, never an uploaded image.
