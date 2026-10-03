@@ -56,6 +56,7 @@ func main() {
 		oidcRedirect   = flag.String("oidc-redirect-url", "", "sign-in: callback URL registered at the issuer (default <public-url>/auth/callback)")
 		adminEmails    = flag.String("admin-emails", "", "comma-separated verified e-mails with no robot limit, who may remove any added robot")
 		robotsPerAcct  = flag.Int("robots-per-account", 3, "how many robots one signed-in account may add")
+		firmwareDir    = flag.String("firmware-dir", "", "the published Embody Mode firmware (manifest.json and its parts) for the setup page /setup; \"\" = /setup can only set up robots that already have it")
 		offers         offerFlags
 	)
 	flag.Var(&offers, "offer", "offer robots another server: name=wss://host[,tokenfile] (repeatable; the token file holds that server's robot token)")
@@ -108,6 +109,7 @@ func main() {
 		OIDCRedirectURL:  *oidcRedirect,
 		AdminEmails:      splitList(*adminEmails),
 		RobotsPerAccount: *robotsPerAcct,
+		FirmwareDir:      *firmwareDir,
 		HTTPSPort:        httpsPort,
 		Offers:           offers,
 		Log:              log,

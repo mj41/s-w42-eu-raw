@@ -24,7 +24,7 @@ import (
 	"github.com/mj41/stackchan-server/wire"
 )
 
-//go:embed ui/index.html ui/robots.html ui/e2e.js ui/emoji
+//go:embed ui/index.html ui/robots.html ui/setup.html ui/e2e.js ui/emoji ui/vendor
 var uiFS embed.FS
 
 // Config configures a Server.
@@ -39,16 +39,18 @@ type Config struct {
 	OIDCIssuer       string
 	OIDCClientID     string
 	OIDCClientSecret string
-	OIDCRedirectURL  string               // default PublicURL + /auth/callback
-	AdminEmails      []string             // verified e-mails without the per-account robot limit, who may remove any added robot
-	RobotsPerAccount int                  // default 3
-	PublicURL        string               // base URL browsers use, e.g. http://192.168.1.10:8765
-	PairTTL          time.Duration        // lifetime of a pairing code
-	UIDir            string               // development: serve index.html from this directory instead of the embedded copy
-	StateFile        string               // JSON snapshot of pairings and robots, loaded by New (see state.go); "" disables
-	HTTPSPort        string               // port of the HTTPS listener for browsers, if any; advertised by /api/info
-	Offers           []wire.OfferedServer // other servers robots may switch to, sent as ServerOffer
-	Log              *slog.Logger
+	OIDCRedirectURL  string   // default PublicURL + /auth/callback
+	AdminEmails      []string // verified e-mails without the per-account robot limit, who may remove any added robot
+	RobotsPerAccount int      // default 3
+
+	FirmwareDir string               // the published firmware (manifest.json and its parts) for /setup; "" = none
+	PublicURL   string               // base URL browsers use, e.g. http://192.168.1.10:8765
+	PairTTL     time.Duration        // lifetime of a pairing code
+	UIDir       string               // development: serve index.html from this directory instead of the embedded copy
+	StateFile   string               // JSON snapshot of pairings and robots, loaded by New (see state.go); "" disables
+	HTTPSPort   string               // port of the HTTPS listener for browsers, if any; advertised by /api/info
+	Offers      []wire.OfferedServer // other servers robots may switch to, sent as ServerOffer
+	Log         *slog.Logger
 }
 
 // Server holds all state in memory. With Config.StateFile, pairings and known
@@ -196,6 +198,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/info", s.handleInfo)
 	mux.HandleFunc("GET /robots", s.handleFleetPage)
 	mux.HandleFunc("GET /e2e.js", s.handleE2EScript)
+	mux.HandleFunc("GET /setup", s.handleSetupPage)
+	mux.HandleFunc("GET /vendor/{file}", s.handleVendor)
+	mux.HandleFunc("GET /firmware/{file}", s.handleFirmware)
 	mux.HandleFunc("GET /auth/login", s.handleLogin)
 	mux.HandleFunc("GET /auth/callback", s.handleAuthCallback)
 	mux.HandleFunc("POST /auth/logout", s.handleLogout)

@@ -50,8 +50,8 @@ type ownedInvite struct {
 }
 
 type pendingLogin struct {
-	session, nonce, verifier string
-	expires                  time.Time
+	session, nonce, verifier, next string
+	expires                        time.Time
 }
 
 // oidcLogin talks to the provider. The provider is looked up on first use, so the server
@@ -93,7 +93,7 @@ func (o *oidcLogin) setup(ctx context.Context) (*oauth2.Config, *oidc.IDTokenVer
 	return o.conf, o.verifier, nil
 }
 
-func (o *oidcLogin) begin(session string) (state string, p pendingLogin) {
+func (o *oidcLogin) begin(session, next string) (state string, p pendingLogin) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	now := time.Now()
@@ -106,7 +106,11 @@ func (o *oidcLogin) begin(session string) (state string, p pendingLogin) {
 		o.pending = map[string]pendingLogin{} // flooded: start over rather than grow
 	}
 	state = randHex(16)
-	p = pendingLogin{session: session, nonce: randHex(16), verifier: oauth2.GenerateVerifier(), expires: now.Add(loginTTL)}
+	// Back to a page of this server only: a path, never "//host" or a URL.
+	if !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.ContainsAny(next, "\\\r\n") {
+		next = "/#your-robots"
+	}
+	p = pendingLogin{session: session, nonce: randHex(16), verifier: oauth2.GenerateVerifier(), next: next, expires: now.Add(loginTTL)}
 	o.pending[state] = p
 	return state, p
 }
@@ -176,7 +180,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "sign-in is not available right now, try again later", http.StatusServiceUnavailable)
 		return
 	}
-	state, p := s.oidc.begin(session)
+	state, p := s.oidc.begin(session, r.URL.Query().Get("next"))
 	http.Redirect(w, r, conf.AuthCodeURL(state, oidc.Nonce(p.nonce), oauth2.S256ChallengeOption(p.verifier)), http.StatusFound)
 }
 
@@ -209,7 +213,7 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 	s.requestSave()
 	s.log.Info("signed in", "account", accountLogID(acct.Key))
-	http.Redirect(w, r, "/#your-robots", http.StatusSeeOther)
+	http.Redirect(w, r, p.next, http.StatusSeeOther)
 }
 
 func (s *Server) exchange(ctx context.Context, code string, p pendingLogin) (Account, error) {
