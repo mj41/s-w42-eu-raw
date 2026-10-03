@@ -86,6 +86,7 @@
     <ol class="steps" id="steps"></ol>
     <progress id="bar" max="1" value="0" hidden></progress>
     <div class="error" id="error"></div>
+    <details id="logbox" hidden><summary class="muted">Details</summary><pre id="log" style="white-space:pre-wrap;font-size:0.8rem;max-height:300px;overflow:auto"></pre></details>
   </section>
 
   <section class="card" id="done" hidden>
@@ -307,17 +308,32 @@ async function firmwareFiles() {
   return files;
 }
 
+// A log of what the page and the installer did, shown under Details when something fails.
+function log(line) { $("log").textContent += line; }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // The installer (esptool-js) on the robot's USB port, for one session: backup, then write.
+// A second try on a fresh connection if the first cannot reach the robot's flasher.
 async function installer(port) {
-  const transport = new Transport(port, false);
-  const loader = new ESPLoader({ transport, baudrate: 921600, terminal: { clean() {}, writeLine() {}, write() {} } });
-  let timer;
-  const chip = await Promise.race([loader.main(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(
-    "The robot does not answer the installer. Hold its reset button until the green LED lights up, then press the button here again.")), 30000); })])
-    .finally(() => clearTimeout(timer))
-    .catch(async (e) => { try { await transport.disconnect(); } catch {} throw e; });
-  if (!/ESP32-S3/i.test(chip)) { await transport.disconnect(); throw new Error(`This is ${chip}, not a Stackchan (ESP32-S3).`); }
-  return { loader, transport };
+  for (let attempt = 1; ; attempt++) {
+    const transport = new Transport(port, false);
+    const loader = new ESPLoader({ transport, baudrate: 921600,
+      terminal: { clean() {}, writeLine: (l) => log(l + "\n"), write: (t) => log(t) } });
+    let timer;
+    try {
+      log(`installer: connecting (try ${attempt})\n`);
+      const chip = await Promise.race([loader.main(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(
+        "The robot does not answer the installer.")), 30000); })]).finally(() => clearTimeout(timer));
+      if (!/ESP32-S3/i.test(chip)) { await transport.disconnect(); throw Object.assign(new Error(`This is ${chip}, not a Stackchan (ESP32-S3).`), { final: true }); }
+      return { loader, transport };
+    } catch (e) {
+      log(`installer: ${e.message || e}\n`);
+      try { await transport.disconnect(); } catch {}
+      if (e.final) throw e;
+      if (attempt >= 2) throw new Error("The robot does not answer the installer. Hold its reset button until the green LED lights up, then press the button here again.");
+      await sleep(1500);
+    }
+  }
 }
 
 async function writeFlash(loader, files) {
@@ -442,6 +458,8 @@ $("start").onclick = async () => {
   }
   $("start").disabled = true;
   $("start").textContent = "Setting up…";
+  $("log").textContent = "";
+  $("logbox").hidden = true;
   $("progressbox").hidden = false;
   steps(names);
   let s = 0, robot, session;
@@ -452,10 +470,12 @@ $("start").onclick = async () => {
     let before = null;
     if (backup || restore) {
       robot = new Robot(port);
-      await robot.open({ reset: true });
-      before = await robot.ask({ op: "hello" }, restore ? 40000 : 10000).catch(() => null);
+      await robot.open(); // no reset: Embody Mode answers as it runs
+      before = await robot.ask({ op: "hello" }, restore ? 40000 : 8000).catch(() => null);
+      log(`hello before: ${before ? "Embody Mode " + before.firmware + (before.original ? ", original firmware recorded" : "") : "no answer (other firmware)"}\n`);
       await robot.close();
       robot = null;
+      await sleep(500); // let the port settle before the installer opens it
     }
     if (restore) {
       step(s++);
@@ -534,6 +554,13 @@ $("start").onclick = async () => {
     $("progressbox").hidden = true;
   } catch (e) {
     $("error").textContent = e.message || String(e);
+    log(`error: ${e.message || e}\n`);
+    $("logbox").hidden = false;
+    // Never leave the robot in the flasher: restart it into its firmware.
+    try {
+      if (session) { await session.transport.disconnect(); session = null; }
+      if (!robot) { robot = new Robot(port); await robot.open({ reset: true }); }
+    } catch {}
   } finally {
     if (session) try { await session.transport.disconnect(); } catch {}
     if (robot) await robot.close(); else try { await port.close(); } catch {}
