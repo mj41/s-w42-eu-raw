@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"mime"
@@ -61,8 +62,24 @@ func (s *Server) handleVendor(w http.ResponseWriter, r *http.Request) {
 // from this origin (browsers cannot fetch GitHub release files: no CORS).
 func (s *Server) handleFirmware(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("file")
-	if s.cfg.FirmwareDir == "" || !fileName.MatchString(name) {
+	if !fileName.MatchString(name) || (s.cfg.FirmwareDir == "" && s.firmware == nil) {
 		http.NotFound(w, r)
+		return
+	}
+	// With sign-in (a public server), installing firmware is for signed-in people.
+	if s.oidc != nil {
+		if _, ok := s.account(s.session(w, r)); !ok {
+			http.Error(w, "sign in first", http.StatusUnauthorized)
+			return
+		}
+	}
+	if s.cfg.FirmwareDir == "" {
+		if err := s.firmware.serve(w, r, name); err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				s.log.Warn("firmware release", "file", name, "err", err)
+			}
+			http.Error(w, "the firmware release is not available", http.StatusNotFound)
+		}
 		return
 	}
 	if name == "manifest.json" {

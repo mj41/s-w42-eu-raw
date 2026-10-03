@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -318,13 +319,37 @@ func (s *Server) robotURLReachable() bool {
 	return true
 }
 
+// localSetup tells whether this request may set a robot up with the server's own robot token,
+// without an account: only on a server without sign-in, and only from a browser on this
+// computer (loopback address and host name, no proxy in between). That is the owner, who can
+// read the token file anyway; on another computer the page asks for the URL and the token.
+func (s *Server) localSetup(r *http.Request) bool {
+	if s.oidc != nil || s.cfg.RobotToken == "" || s.cfg.TrustedProxies > 0 ||
+		r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("Forwarded") != "" {
+		return false
+	}
+	isLoopback := func(hostport string) bool {
+		host := hostport
+		if h, _, err := net.SplitHostPort(hostport); err == nil {
+			host = h
+		}
+		host = strings.Trim(host, "[]")
+		if strings.EqualFold(host, "localhost") {
+			return true
+		}
+		ip, err := netip.ParseAddr(host)
+		return err == nil && ip.IsLoopback()
+	}
+	return isLoopback(r.RemoteAddr) && isLoopback(r.Host)
+}
+
 // GET /api/me
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	session := s.session(w, r)
 	a, ok := s.account(session)
 	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{"signed_in": false, "sign_in": s.oidc != nil,
-			"robot_url": s.robotURL(), "robot_reachable": s.robotURLReachable()})
+			"local_setup": s.localSetup(r), "robot_url": s.robotURL(), "robot_reachable": s.robotURLReachable()})
 		return
 	}
 	s.mu.Lock()

@@ -43,14 +43,17 @@ type Config struct {
 	AdminEmails      []string // verified e-mails without the per-account robot limit, who may remove any added robot
 	RobotsPerAccount int      // default 3
 
-	FirmwareDir string               // the published firmware (manifest.json and its parts) for /setup; "" = none
-	PublicURL   string               // base URL browsers use, e.g. http://192.168.1.10:8765
-	PairTTL     time.Duration        // lifetime of a pairing code
-	UIDir       string               // development: serve index.html from this directory instead of the embedded copy
-	StateFile   string               // JSON snapshot of pairings and robots, loaded by New (see state.go); "" disables
-	HTTPSPort   string               // port of the HTTPS listener for browsers, if any; advertised by /api/info
-	Offers      []wire.OfferedServer // other servers robots may switch to, sent as ServerOffer
-	Log         *slog.Logger
+	FirmwareDir      string               // the official firmware (manifest.json and its parts) for /setup, from disk; wins over FirmwareRelease
+	FirmwareRelease  string               // else fetched from its GitHub release: "latest" or a tag (embody-v…); "" = no firmware
+	FirmwareCacheDir string               // where fetched parts are kept, by SHA-256; "" = not kept
+	FirmwareBaseURL  string               // default https://github.com/mj41/StackChan/releases (tests)
+	PublicURL        string               // base URL browsers use, e.g. http://192.168.1.10:8765
+	PairTTL          time.Duration        // lifetime of a pairing code
+	UIDir            string               // development: serve index.html from this directory instead of the embedded copy
+	StateFile        string               // JSON snapshot of pairings and robots, loaded by New (see state.go); "" disables
+	HTTPSPort        string               // port of the HTTPS listener for browsers, if any; advertised by /api/info
+	Offers           []wire.OfferedServer // other servers robots may switch to, sent as ServerOffer
+	Log              *slog.Logger
 }
 
 // Server holds all state in memory. With Config.StateFile, pairings and known
@@ -59,10 +62,11 @@ type Server struct {
 	cfg Config
 	log *slog.Logger
 
-	mu      sync.Mutex
-	robots  map[string]*robotState // by robot id; kept after disconnect
-	codes   map[string]pairCode    // one-time pairing codes
-	invites *robotInvites          // per-robot invite tokens (nil: none)
+	mu       sync.Mutex
+	robots   map[string]*robotState // by robot id; kept after disconnect
+	codes    map[string]pairCode    // one-time pairing codes
+	invites  *robotInvites          // per-robot invite tokens (nil: none)
+	firmware *firmwareRelease       // the official firmware from GitHub (nil: none or FirmwareDir)
 
 	oidc        *oidcLogin             // nil: no sign-in
 	logins      map[string]Account     // browser session id -> signed-in account
@@ -173,6 +177,13 @@ func New(cfg Config) *Server {
 		ownerRobots:  map[string]bool{},
 		public:       map[string]bool{},
 	}
+	if cfg.FirmwareDir == "" && cfg.FirmwareRelease != "" {
+		base := cfg.FirmwareBaseURL
+		if base == "" {
+			base = firmwareReleases
+		}
+		s.firmware = newFirmwareRelease(base, cfg.FirmwareRelease, cfg.FirmwareCacheDir)
+	}
 	if cfg.RobotTokensFile != "" {
 		s.invites = newRobotInvites(cfg.RobotTokensFile)
 		if _, err := s.invites.ok("", "-"); err != nil {
@@ -206,6 +217,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/me", s.handleMe)
 	mux.HandleFunc("POST /api/my/robots", s.handleAddMyRobot)
+	mux.HandleFunc("POST /api/setup/local", s.handleSetupLocal)
 	mux.HandleFunc("DELETE /api/my/robots/{id}", s.handleRemoveMyRobot)
 	mux.HandleFunc("POST /api/my/robots/{id}/access", s.handleRobotAccess)
 	mux.HandleFunc("POST /api/join", s.handleJoinRequest)

@@ -69,7 +69,7 @@ go run ./cmd/fake-robot                    # simulated robot, in a second termin
 - `-trusted-proxies 1` behind one reverse proxy that appends the client address to `X-Forwarded-For` (Envoy, nginx with `$proxy_add_x_forwarded_for`). The default 0 ignores that header, because clients can forge it. Limits and logs use the address.
 - **Limits:** 20 failed logins per address and robot id in 10 minutes, then HTTP 429 for that robot from that address, right token included (other robots behind the same address keep working); 20 wrong pairing codes per address in 10 minutes, then 429. Invited robots may send 300 messages/s and 512 KB/s on average (bursts of 1000 messages and 4 MB), and are disconnected above that; the owner's robots are not limited. Browsers: at most 8 open event streams per session and 30 per address, 4 media sockets per session and robot and 20 per address, and 20 commands, pictures or uploads per second per session (bursts of 60); above that HTTP 429.
 - `-no-address-limits` turns the per-address limits off, for a server that cannot see client addresses (behind a TCP load balancer without the PROXY protocol, every client has the balancer's address, and one stranger's failures would lock everybody out). The send budgets for invited robots stay.
-- `-firmware-dir <dir>` serves the official Embody Mode firmware release (`manifest.json` and its parts) for the setup page `/setup` (see "Set a robot up over USB" below). Without it, `/setup` can only set up robots that already have Embody Mode.
+- `-firmware-release latest` (the default; or a tag such as `embody-v0.1.0`, `""` for none): the official Embody Mode firmware for the setup page `/setup` (see "Set a robot up over USB" below), fetched from the [GitHub release](https://github.com/mj41/StackChan/releases), every part checked against the manifest's SHA-256, and kept in `~/.cache/stackchan-server/firmware`. `-firmware-dir <dir>` serves the same files from a directory instead. On a server with sign-in, only signed-in people get them.
 - `-ui-dir internal/server/ui` serves the dashboard from disk on every request (development). UI edits then need only a page reload.
 - Open the dashboard with the same host as the QR code (e.g. `http://192.168.1.10:8765/`, not `localhost`). The pairing cookie belongs to that host.
 - Run `go test -race ./...` for the tests.
@@ -153,13 +153,27 @@ robot** and pick the "USB JTAG/serial debug unit". The page then:
 5. after which the robot connects. It is private to you: open the dashboard on this server,
    signed in, and it is there (or scan the QR code on its screen with a signed-in phone).
 
+**Your own server:** open its setup page on the computer it runs on,
+`http://localhost:8765/setup`, and press the button: the server fills in its address (the
+`-public-url`, by default `ws://<LAN IP>:8765`), its robot token and this computer's Wi-Fi
+(name and password from NetworkManager on Linux or netsh on Windows; only the name on macOS).
+Nothing to type. It hands those out only without sign-in, and only to a browser on the same
+computer (loopback address and host name, no proxy). To set a robot up from another computer,
+press **Copy setup for another computer** there and paste it into the setup page elsewhere (Options,
+Server, "My own server"; chan.w42.eu/setup too):
+
+```json
+{"server": {"name": "192.168.1.10:8765", "url": "ws://192.168.1.10:8765", "token": "…"},
+ "wifi": {"ssid": "Home", "password": "…"}}
+```
+
+It holds the robot token and the Wi-Fi password: keep it private.
+
 **Options** on the same page: Wi-Fi (sent only to the robot, never to the server), keep the
 robot's firmware (e.g. your own build, flashed from a terminal), **restore the original
 firmware** from the backup file (only the file whose SHA-256 the robot recorded; or from a
-terminal, `esptool.py write_flash 0x0 <file>`), and your own server (its URL
-and robot token) instead of this one, which works without sign-in too, e.g.
-`http://localhost:8765/setup` for a server on your laptop. The page installs only the official
-firmware, never an uploaded image.
+terminal, `esptool.py write_flash 0x0 <file>`), and your own server. The page installs only the
+official firmware, never an uploaded image.
 
 **From a terminal: `stackchan-usb`**, the same over USB for developers and scripts (the robot
 must already have firmware with USB setup):
@@ -178,10 +192,11 @@ go run ./cmd/stackchan-usb restart      # into Embody Mode
 - The protocol: lines `@stackchan <JSON>` on the USB serial port, described in the firmware's
   [usb_setup.h](https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/usb_setup.h).
 
-**Serving the firmware.** `/setup` installs what `-firmware-dir` holds: the files of an
-official `embody-v*` release of [mj41/StackChan](https://github.com/mj41/StackChan/releases)
-(`manifest.json` and its parts, built by CI from the one firmware source with its release
-configuration; every part is checked against the manifest's SHA-256). The release has no
+**The firmware.** `/setup` installs the official `embody-v*` release of
+[mj41/StackChan](https://github.com/mj41/StackChan/releases) (`manifest.json` and its parts,
+built by CI from the one firmware source with its release configuration; the server and the page
+both check every part against the manifest's SHA-256), fetched by the server
+(`-firmware-release`) or from `-firmware-dir`. The release has no
 server and no token inside: those are the robot's settings, written over USB. Until it is set
 up, the robot's Embody Mode shows "Set up: chan.w42.eu/setup".
 

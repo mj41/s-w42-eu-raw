@@ -56,7 +56,8 @@ func main() {
 		oidcRedirect   = flag.String("oidc-redirect-url", "", "sign-in: callback URL registered at the issuer (default <public-url>/auth/callback)")
 		adminEmails    = flag.String("admin-emails", "", "comma-separated verified e-mails with no robot limit, who may remove any added robot")
 		robotsPerAcct  = flag.Int("robots-per-account", 3, "how many robots one signed-in account may add")
-		firmwareDir    = flag.String("firmware-dir", "", "the published Embody Mode firmware (manifest.json and its parts) for the setup page /setup; \"\" = /setup can only set up robots that already have it")
+		firmwareDir    = flag.String("firmware-dir", "", "the official Embody Mode firmware (manifest.json and its parts) for the setup page /setup, from this directory instead of GitHub")
+		firmwareRel    = flag.String("firmware-release", "latest", "else the official firmware for /setup from this GitHub release of mj41/StackChan: latest, a tag (embody-v…), or \"\" for none (/setup then only sets up robots that already have it)")
 		offers         offerFlags
 	)
 	flag.Var(&offers, "offer", "offer robots another server: name=wss://host[,tokenfile] (repeatable; the token file holds that server's robot token)")
@@ -110,6 +111,8 @@ func main() {
 		AdminEmails:      splitList(*adminEmails),
 		RobotsPerAccount: *robotsPerAcct,
 		FirmwareDir:      *firmwareDir,
+		FirmwareRelease:  *firmwareRel,
+		FirmwareCacheDir: firmwareCache(),
 		HTTPSPort:        httpsPort,
 		Offers:           offers,
 		Log:              log,
@@ -289,4 +292,13 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// firmwareCache: where firmware fetched from GitHub is kept (~/.cache/stackchan-server/firmware).
+func firmwareCache() string {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "stackchan-server", "firmware")
 }

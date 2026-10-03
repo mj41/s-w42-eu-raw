@@ -31,7 +31,7 @@
     background: var(--accent); color: var(--accent-text); cursor: pointer; text-decoration: none; display: inline-block; }
   button.big { width: 100%; font-size: 1.15rem; padding: 16px; }
   button:disabled { opacity: 0.45; cursor: default; }
-  input[type=text], input[type=password], input[type=url] { font: inherit; width: 100%; padding: 9px 12px; border-radius: 10px;
+  input[type=text], input[type=password], input[type=url], textarea { font: inherit; width: 100%; padding: 9px 12px; border-radius: 10px;
     border: 1px solid var(--border); background: var(--bg); color: var(--text); margin: 4px 0 10px; }
   label { display: block; font-size: 0.9rem; color: var(--muted); }
   label.radio, label.check { display: flex; gap: 8px; align-items: flex-start; color: var(--text); margin: 6px 0; font-size: 0.95rem; }
@@ -61,7 +61,7 @@
 
   <h1>Set up your Stackchan</h1>
   <p class="sub">Plug the robot into this computer with a USB-C data cable (the port on its head),
-  then press the button. The page installs the firmware and connects the robot to your account.</p>
+  then press the button. The page installs the firmware and connects the robot to its server.</p>
 
   <section class="card" id="nobrowser" hidden>
     <p class="error">This browser cannot talk to USB devices. Use Chrome or Edge on a computer
@@ -76,6 +76,7 @@
 
   <section class="card" id="go">
     <button class="big" id="start">Set up my robot</button>
+    <p id="summary" style="margin:10px 0 0"></p>
     <p class="muted" style="margin:10px 0 0">Chrome asks which device to use: choose the one named
     <b>USB JTAG/serial debug unit</b>. Setting up takes about two minutes.</p>
   </section>
@@ -122,15 +123,20 @@
 
     <h2>Server</h2>
     <label class="radio" id="herebox"><input type="radio" name="srv" value="here" checked> <span>This server
-      (<span id="host"></span>), with my account (recommended)</span></label>
+      (<span id="host"></span>), <span id="herehow">with my account</span> (recommended)</span></label>
     <p class="muted" id="unreachable" hidden>This server cannot be the robot's server: its address
       <code id="badurl"></code> means the robot itself on the robot. Start it with
       <code>-public-url http://&lt;its LAN IP&gt;:&lt;port&gt;</code>, or give your server below.</p>
     <label class="radio"><input type="radio" name="srv" value="own"> <span>My own server</span></label>
     <div id="ownsrv" hidden>
-      <label>Server URL <input type="url" id="srvurl" placeholder="ws://192.168.1.10:8765"></label>
-      <label>Robot token (the content of the server's robot-token file) <input type="password" id="srvtoken" autocomplete="off"></label>
+      <label>Setup from your server <textarea id="setupjson" rows="4" spellcheck="false" autocomplete="off"
+        placeholder='{"server": {"url": "ws://192.168.1.10:8765", "token": "…"}, "wifi": {"ssid": "…", "password": "…"}}'></textarea></label>
+      <p class="muted">Get it on the computer your server runs on: open its setup page there
+      (e.g. <code>http://localhost:8765/setup</code>) and press <b>Copy setup for another computer</b>.</p>
     </div>
+    <p id="copybox" hidden><button class="soft small" id="copysetup">Copy setup for another computer</button>
+      <span class="muted" id="copied"></span><br><span class="muted">The server's address, its robot token and
+      this computer's Wi-Fi, to paste into the setup page on another computer. Keep it private.</span></p>
     <p class="muted">Developers: the same over USB from a terminal with <code>stackchan-usb</code>
     (<a href="https://github.com/mj41/stackchan-server#set-a-robot-up-over-usb">readme</a>). Your own
     firmware build: flash it from a terminal
@@ -162,10 +168,31 @@ for (const r of document.querySelectorAll("input[name=fw]")) r.onchange = () => 
 };
 for (const r of document.querySelectorAll("input[name=srv]")) r.onchange = () => { $("ownsrv").hidden = radio("srv") !== "own"; refresh(); };
 
+let localSetup = null; // the server's setup, on the server's own computer (/api/setup/local)
+
 function refresh() {
-  const free = radio("srv") === "own" || radio("fw") === "restore"; // no account needed
-  $("signin").hidden = free || me.signed_in || !me.sign_in;
-  $("start").disabled = !("serial" in navigator) || (!free && !me.signed_in);
+  // On a server with sign-in, its token and its firmware are for signed-in people; restoring
+  // a backup, or your own server with the robot's firmware, needs no account.
+  const fw = radio("fw");
+  const needAccount = me.sign_in && !localSetup && fw !== "restore" && (radio("srv") === "here" || fw === "latest");
+  $("signin").hidden = !needAccount || me.signed_in;
+  $("start").disabled = !("serial" in navigator) || (needAccount && !me.signed_in);
+  summarize();
+}
+
+// One line on what the button does with the current options.
+function summarize() {
+  const fw = radio("fw");
+  if (fw === "restore") { $("summary").textContent = "Puts the robot's original firmware back from its backup file."; return; }
+  let server = "";
+  if (radio("srv") === "own") {
+    const p = parseSetup($("setupjson").value);
+    server = typeof p === "string" ? "your server (paste its setup in Options)" : p.server.name;
+  } else server = (me.robot_url ? $("host").textContent : location.host) + (localSetup ? " (this computer)" : ", your account");
+  const ssid = $("ssid").value.trim();
+  const parts = [`Server: ${server}`, ssid ? `Wi-Fi: ${ssid}` : "Wi-Fi: set on the robot later",
+    fw === "latest" ? `Firmware: official Embody Mode ${$("fwversion").textContent}` + ($("backup").checked ? " (backup first)" : "") : "Firmware: keep"];
+  $("summary").replaceChildren(...parts.flatMap((t, i) => [i ? " · " : "", t]));
 }
 
 async function loadMe() {
@@ -173,17 +200,28 @@ async function loadMe() {
   $("acct").textContent = me.signed_in ? me.name : "";
   const robotHost = (u) => { try { return new URL(u.replace(/^ws/, "http")).host; } catch { return u; } };
   $("host").textContent = robotHost(me.robot_url || "");
-  // "This server" needs sign-in (a token for your account) and an address robots can reach
-  // (never localhost: on the robot that is the robot itself).
-  if (!me.sign_in || !me.robot_reachable) {
+  // On the server's own computer, without sign-in: the server gives its setup (address,
+  // token, this computer's Wi-Fi), nothing to type.
+  if (me.local_setup && me.robot_reachable) {
+    localSetup = await fetch("/api/setup/local", { method: "POST", credentials: "same-origin" }).then((r) => r.ok ? r.json() : null).catch(() => null);
+  }
+  if (localSetup) {
+    $("herehow").textContent = "on this computer";
+    $("copybox").hidden = false;
+    if (localSetup.wifi && !$("ssid").value) {
+      $("ssid").value = localSetup.wifi.ssid;
+      $("wifipass").value = localSetup.wifi.password || "";
+    }
+  }
+  // "This server" needs sign-in (a token for your account) or this computer, and an address
+  // robots can reach (never localhost: on the robot that is the robot itself).
+  else if (!me.sign_in || !me.robot_reachable) {
     $("herebox").hidden = true;
     $("unreachable").hidden = !me.sign_in || me.robot_reachable;
     $("badurl").textContent = me.robot_url || "(none)";
     document.querySelector("input[name=srv][value=own]").checked = true;
     $("ownsrv").hidden = false;
     $("options").open = true;
-    // A server without sign-in is usually your own: prefill its address, you give the token.
-    if (me.robot_reachable && !$("srvurl").value) $("srvurl").value = me.robot_url;
   }
   refresh();
 }
@@ -255,7 +293,11 @@ const hex = (buf) => Array.from(new Uint8Array(buf), (b) => b.toString(16).padSt
 const sha256 = async (data) => hex(await crypto.subtle.digest("SHA-256", data));
 
 async function firmwareFiles() {
-  const m = await fetch("/firmware/manifest.json").then((r) => { if (!r.ok) throw new Error("This server has no firmware to install: choose \"Keep the robot's firmware\" in Options."); return r.json(); });
+  const m = await fetch("/firmware/manifest.json").then((r) => {
+    if (r.status === 401) throw new Error("Sign in first to install the firmware.");
+    if (!r.ok) throw new Error("This server has no firmware to install: choose \"Keep the robot's firmware\" in Options.");
+    return r.json();
+  });
   const files = [];
   for (const p of m.parts) {
     const data = new Uint8Array(await fetch("/firmware/" + p.path).then((r) => { if (!r.ok) throw new Error("download " + p.path); return r.arrayBuffer(); }));
@@ -347,18 +389,39 @@ function offerDownload(blob, name) {
   a.click();
 }
 
+// The setup a server gives (Copy setup for another computer): {"server": {name, url, token},
+// "wifi": {ssid, password}}, or only {url, token}. Returns it, or what is wrong as a string.
+function parseSetup(text) {
+  let v;
+  try { v = JSON.parse(text.trim()); } catch { return "Own server: paste the setup from your server (it starts with {)."; }
+  const srv = v.server || v;
+  const url = String(srv.url || "").trim(), token = String(srv.token || "").trim();
+  if (!/^wss?:\/\/[^/]/.test(url)) return "Own server: the setup has no server address (ws://… or wss://…).";
+  if (/^wss?:\/\/(localhost|127\.|\[::1\])/i.test(url)) return "Own server: localhost on the robot is the robot itself. Start your server with -public-url http://<its LAN IP>:<port> and copy the setup again.";
+  if (!token) return "Own server: the setup has no token.";
+  const name = String(srv.name || "").trim() || new URL(url.replace(/^ws/, "http")).host;
+  const wifi = v.wifi?.ssid ? { ssid: String(v.wifi.ssid), password: String(v.wifi.password || "") } : null;
+  return { server: { name, url, token }, wifi };
+}
+
+for (const id of ["ssid", "setupjson", "backup"]) $(id).addEventListener("input", summarize);
+$("copysetup").onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(localSetup, null, 2));
+    $("copied").textContent = "Copied.";
+  } catch { $("copied").textContent = "Copying failed."; }
+};
+
 // --- the button ---
 $("start").onclick = async () => {
   $("error").textContent = "";
   $("done").hidden = true;
   const fw = radio("fw"), own = radio("srv") === "own", restore = fw === "restore";
-  const ownURL = $("srvurl").value.trim(), ownToken = $("srvtoken").value.trim();
-  let bad = "";
+  let bad = "", pasted = null;
   if (restore && !$("restorefile").files[0]) bad = "Choose the backup file to restore (Options, Firmware).";
   else if (own && !restore) { // checked before anything happens to the robot
-    if (!/^wss?:\/\/[^/]/.test(ownURL)) bad = "Own server: give its URL, starting with ws:// or wss://.";
-    else if (/^wss?:\/\/(localhost|127\.|\[::1\])/i.test(ownURL)) bad = "Own server: localhost on the robot is the robot itself. Use the computer's address in your network, e.g. ws://192.168.1.10:8765.";
-    else if (!ownToken) bad = "Own server: give its robot token (the content of its robot-token file). Only a server with your account (\"This server\") makes one for you.";
+    pasted = parseSetup($("setupjson").value);
+    if (typeof pasted === "string") bad = pasted;
   }
   if (bad) { $("options").open = true; $("progressbox").hidden = false; $("steps").replaceChildren(); $("error").textContent = bad; return; }
 
@@ -440,7 +503,9 @@ $("start").onclick = async () => {
     step(s++);
     let server;
     if (own) {
-      server = { name: new URL(ownURL.replace(/^ws/, "http")).host, url: ownURL, token: ownToken };
+      server = pasted.server;
+    } else if (localSetup && !me.signed_in) {
+      server = localSetup.server;
     } else {
       const res = await fetch("/api/my/robots", {
         method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
@@ -454,6 +519,7 @@ $("start").onclick = async () => {
     const req = { op: "provision", server, default: true, autostart: true };
     if (original) req.original = original;
     if ($("ssid").value.trim()) req.wifi = { ssid: $("ssid").value.trim(), password: $("wifipass").value };
+    else if (pasted?.wifi?.ssid) req.wifi = pasted.wifi;
     const p = await robot.ask(req, 15000);
     if (!p.ok) throw new Error("The robot refused the settings: " + (p.error || "unknown"));
     step(s++);
@@ -461,7 +527,8 @@ $("start").onclick = async () => {
     step(s);
     $("donetext").textContent = (req.wifi ? "Your robot restarts and connects to Wi-Fi “" + req.wifi.ssid + "”" :
       "Your robot restarts. If it does not know your Wi-Fi yet, it opens a hotspot: connect your phone to it and choose your network") +
-      (own ? `, then to ${server.name}.` : `, then to ${server.name}. It is private: open the dashboard here, signed in, to see it.`);
+      (me.signed_in && !own ? `, then to ${server.name}. It is private: open the dashboard here, signed in, to see it.`
+        : `, then to ${server.name}: scan the QR code on its screen with your phone to pair.`);
     $("donelink").hidden = false;
     $("done").hidden = false;
     $("progressbox").hidden = true;
@@ -477,7 +544,7 @@ $("start").onclick = async () => {
 };
 
 if (!("serial" in navigator)) { $("nobrowser").hidden = false; $("go").hidden = true; }
-fetch("/firmware/manifest.json").then((r) => r.ok ? r.json() : null).then((m) => { if (m) $("fwversion").textContent = m.version; }).catch(() => {});
+fetch("/firmware/manifest.json").then((r) => r.ok ? r.json() : null).then((m) => { if (m) $("fwversion").textContent = m.version; summarize(); }).catch(() => {});
 loadMe();
 </script>
 </body>
