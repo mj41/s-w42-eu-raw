@@ -37,20 +37,26 @@ func main() {
 		os.Exit(invite(os.Args[2:]))
 	}
 	var (
-		listen    = flag.String("listen", ":8765", "HTTP listen address for robots and browsers")
-		publicURL = flag.String("public-url", "", "base URL browsers use to reach this server (default: http://<LAN IP>:<port>)")
-		tokenFile = flag.String("token-file", defaultTokenFile(), "file with the robot bearer token; generated if missing")
-		pairTTL   = flag.Duration("pair-ttl", 5*time.Minute, "lifetime of a pairing code")
-		debug     = flag.Bool("debug", false, "debug logging")
-		stateFile = flag.String("state-file", defaultStateFile(), "JSON file that keeps pairings and robots across restarts (\"\" disables)")
-		uiDir     = flag.String("ui-dir", "", "development: serve index.html from this directory on every request (e.g. internal/server/ui), so UI edits need only a page reload")
-		tlsListen = flag.String("tls-listen", "", "also serve browsers over HTTPS on this address, e.g. :8766 (robots stay on -listen)")
-		tlsCert   = flag.String("tls-cert", defaultConfigFile("tls-cert.pem"), "TLS certificate for -tls-listen; a self-signed one is created if missing")
-		tlsKey    = flag.String("tls-key", defaultConfigFile("tls-key.pem"), "TLS key for -tls-listen")
-		invites   = flag.String("robot-tokens-file", "", "per-robot invite tokens: lines \"<robot id> <sha256 of its token>\", read again when changed (\"\" disables; see `stackchan-server invite`)")
-		proxies   = flag.Int("trusted-proxies", 0, "reverse proxies in front of this server that append the client address to X-Forwarded-For (1 behind one gateway); 0 ignores the header, which clients can forge")
-		noAddrLim = flag.Bool("no-address-limits", false, "turn off the per-address limits (failed logins, wrong pairing codes): for a server that cannot see client addresses, e.g. behind a TCP load balancer without the PROXY protocol, where every client would share one address")
-		offers    offerFlags
+		listen         = flag.String("listen", ":8765", "HTTP listen address for robots and browsers")
+		publicURL      = flag.String("public-url", "", "base URL browsers use to reach this server (default: http://<LAN IP>:<port>)")
+		tokenFile      = flag.String("token-file", defaultTokenFile(), "file with the robot bearer token; generated if missing")
+		pairTTL        = flag.Duration("pair-ttl", 5*time.Minute, "lifetime of a pairing code")
+		debug          = flag.Bool("debug", false, "debug logging")
+		stateFile      = flag.String("state-file", defaultStateFile(), "JSON file that keeps pairings and robots across restarts (\"\" disables)")
+		uiDir          = flag.String("ui-dir", "", "development: serve index.html from this directory on every request (e.g. internal/server/ui), so UI edits need only a page reload")
+		tlsListen      = flag.String("tls-listen", "", "also serve browsers over HTTPS on this address, e.g. :8766 (robots stay on -listen)")
+		tlsCert        = flag.String("tls-cert", defaultConfigFile("tls-cert.pem"), "TLS certificate for -tls-listen; a self-signed one is created if missing")
+		tlsKey         = flag.String("tls-key", defaultConfigFile("tls-key.pem"), "TLS key for -tls-listen")
+		invites        = flag.String("robot-tokens-file", "", "per-robot invite tokens: lines \"<robot id> <sha256 of its token>\", read again when changed (\"\" disables; see `stackchan-server invite`)")
+		proxies        = flag.Int("trusted-proxies", 0, "reverse proxies in front of this server that append the client address to X-Forwarded-For (1 behind one gateway); 0 ignores the header, which clients can forge")
+		noAddrLim      = flag.Bool("no-address-limits", false, "turn off the per-address limits (failed logins, wrong pairing codes): for a server that cannot see client addresses, e.g. behind a TCP load balancer without the PROXY protocol, where every client would share one address")
+		oidcIssuer     = flag.String("oidc-issuer", "", "sign-in: OpenID Connect issuer, e.g. https://auth.w42.eu (\"\" disables sign-in and self-service robot invites)")
+		oidcClientID   = flag.String("oidc-client-id", "", "sign-in: this server's client id at the issuer")
+		oidcSecretFile = flag.String("oidc-client-secret-file", "", "sign-in: file with the client secret")
+		oidcRedirect   = flag.String("oidc-redirect-url", "", "sign-in: callback URL registered at the issuer (default <public-url>/auth/callback)")
+		adminEmails    = flag.String("admin-emails", "", "comma-separated verified e-mails with no robot limit, who may remove any added robot")
+		robotsPerAcct  = flag.Int("robots-per-account", 3, "how many robots one signed-in account may add")
+		offers         offerFlags
 	)
 	flag.Var(&offers, "offer", "offer robots another server: name=wss://host[,tokenfile] (repeatable; the token file holds that server's robot token)")
 	flag.Parse()
@@ -88,17 +94,23 @@ func main() {
 	}
 
 	srv := server.New(server.Config{
-		RobotToken:      token,
-		PublicURL:       strings.TrimRight(*publicURL, "/"),
-		PairTTL:         *pairTTL,
-		UIDir:           *uiDir,
-		StateFile:       *stateFile,
-		RobotTokensFile: *invites,
-		TrustedProxies:  *proxies,
-		NoAddressLimits: *noAddrLim,
-		HTTPSPort:       httpsPort,
-		Offers:          offers,
-		Log:             log,
+		RobotToken:       token,
+		PublicURL:        strings.TrimRight(*publicURL, "/"),
+		PairTTL:          *pairTTL,
+		UIDir:            *uiDir,
+		StateFile:        *stateFile,
+		RobotTokensFile:  *invites,
+		TrustedProxies:   *proxies,
+		NoAddressLimits:  *noAddrLim,
+		OIDCIssuer:       *oidcIssuer,
+		OIDCClientID:     *oidcClientID,
+		OIDCClientSecret: readSecretFile(*oidcSecretFile, log),
+		OIDCRedirectURL:  *oidcRedirect,
+		AdminEmails:      splitList(*adminEmails),
+		RobotsPerAccount: *robotsPerAcct,
+		HTTPSPort:        httpsPort,
+		Offers:           offers,
+		Log:              log,
 	})
 	httpSrv := &http.Server{Addr: *listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	var httpsSrv *http.Server
@@ -252,4 +264,27 @@ func invite(args []string) int {
 	fmt.Printf("Token for the robot (its sdkconfig, CONFIG_STACKCHAN_EMBODY_TOKEN); give it only to its owner:\n  %s\n", token)
 	fmt.Printf("Line for the server's -robot-tokens-file (holds only the hash):\n  %s\n", line)
 	return 0
+}
+
+// readSecretFile reads a one-line secret; "" for no file. A missing file is fatal.
+func readSecretFile(path string, log *slog.Logger) string {
+	if path == "" {
+		return ""
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		log.Error("secret file", "file", path, "err", err)
+		os.Exit(1)
+	}
+	return strings.TrimSpace(string(b))
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

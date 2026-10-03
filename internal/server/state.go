@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,6 +32,10 @@ type stateFile struct {
 	Version  int                 `json:"version"`
 	Sessions map[string][]string `json:"sessions"` // browser session id -> paired robot ids
 	Robots   []robotRecord       `json:"robots"`
+
+	Logins      map[string]Account `json:"logins,omitempty"`        // browser session id -> signed-in account
+	Owned       []ownedInvite      `json:"owned_invites,omitempty"` // robots added by accounts (token hashes only)
+	OwnerRobots []string           `json:"owner_robots,omitempty"`  // ids seen with the shared token
 }
 
 type robotRecord struct {
@@ -98,6 +103,15 @@ func (s *Server) loadState() error {
 		}
 		s.robots[r.ID] = rs
 	}
+	for k, v := range st.Logins {
+		s.logins[k] = v
+	}
+	for _, inv := range st.Owned {
+		s.owned[inv.RobotID] = inv
+	}
+	for _, id := range st.OwnerRobots {
+		s.ownerRobots[id] = true
+	}
 	s.log.Info("state loaded", "file", s.cfg.StateFile, "sessions", len(st.Sessions), "robots", len(st.Robots))
 	return nil
 }
@@ -113,6 +127,17 @@ func (s *Server) snapshot() ([]byte, error) {
 		}
 		slices.Sort(st.Sessions[session])
 	}
+	if len(s.logins) > 0 {
+		st.Logins = maps.Clone(s.logins)
+	}
+	for _, inv := range s.owned {
+		st.Owned = append(st.Owned, inv)
+	}
+	slices.SortFunc(st.Owned, func(a, b ownedInvite) int { return strings.Compare(a.RobotID, b.RobotID) })
+	for id := range s.ownerRobots {
+		st.OwnerRobots = append(st.OwnerRobots, id)
+	}
+	slices.Sort(st.OwnerRobots)
 	for _, r := range s.robots {
 		rec := robotRecord{
 			ID: r.id, Capabilities: r.caps, Labels: r.labels, LastSeen: r.lastSeen,

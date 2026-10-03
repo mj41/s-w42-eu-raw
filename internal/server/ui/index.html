@@ -24,6 +24,10 @@
        margin: 16px 0 8px; }
   .sub { color: var(--muted); margin: 0 0 16px; }
   .foot { color: var(--muted); font-size: 0.85rem; margin: 32px 0 8px; line-height: 1.6; }
+  nav.top { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; margin-bottom: 16px; font-size: 0.95rem; }
+  nav.top a { color: var(--muted); text-decoration: none; }
+  nav.top a.here { color: var(--text); font-weight: 600; }
+  nav.top .acct { margin-left: auto; color: var(--muted); }
   .foot a { color: inherit; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px;
           padding: 16px; margin-bottom: 12px; }
@@ -80,6 +84,11 @@
 </head>
 <body>
 <main>
+  <nav class="top">
+    <a href="/" class="here">Dashboard</a>
+    <a href="/robots">Your robots</a>
+    <span class="acct" id="acct"></span>
+  </nav>
   <h1>Stackchan</h1>
   <p class="sub" id="conn">Connecting…</p>
   <div id="joins"></div>
@@ -105,7 +114,7 @@
     <a href="https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/SETUP.md">set up a robot</a> ·
     part of <a href="https://github.com/mj41/home-w42-eu">home-w42-eu</a> ·
     <a href="https://github.com/sponsors/mj41">sponsor mj41</a> ·
-    your robot on chan.w42.eu? <a href="https://github.com/mj41/home-w42-eu/issues">ask for an invite token</a>
+    your robot here? <a href="/robots">add it</a>
   </footer>
 </main>
 <script>
@@ -1418,6 +1427,25 @@ function connect() {
 
 empty.hidden = false;
 connect();
+// Account in the top bar (sign-in exists only when the server has it configured).
+fetch("/api/me", { credentials: "same-origin" }).then((r) => r.json()).then((me) => {
+  const acct = document.getElementById("acct");
+  if (me.signed_in) {
+    acct.append(me.name + " · ");
+    const out = document.createElement("a");
+    out.href = "#"; out.textContent = "Sign out";
+    out.addEventListener("click", async (ev) => {
+      ev.preventDefault();
+      await fetch("/auth/logout", { method: "POST", credentials: "same-origin" });
+      location.reload();
+    });
+    acct.append(out);
+  } else if (me.sign_in) {
+    const a = document.createElement("a");
+    a.href = "/auth/login"; a.textContent = "Sign in";
+    acct.append(a);
+  }
+}).catch(() => {});
 // Refresh "seen … ago" for offline robots.
 setInterval(() => { for (const c of cards.values()) if (c.robot && !c.robot.online) c.update(c.robot); }, 5000);
 </script>

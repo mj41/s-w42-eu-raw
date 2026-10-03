@@ -19,10 +19,19 @@ import (
 )
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	s.servePage(w, r, "index.html")
+}
+
+// handleFleetPage (GET /robots): sign in, your robots, adding one.
+func (s *Server) handleFleetPage(w http.ResponseWriter, r *http.Request) {
+	s.servePage(w, r, "robots.html")
+}
+
+func (s *Server) servePage(w http.ResponseWriter, r *http.Request, name string) {
 	s.session(w, r)
-	page, err := uiFS.ReadFile("ui/index.html")
+	page, err := uiFS.ReadFile("ui/" + name)
 	if s.cfg.UIDir != "" {
-		page, err = os.ReadFile(filepath.Join(s.cfg.UIDir, "index.html"))
+		page, err = os.ReadFile(filepath.Join(s.cfg.UIDir, name))
 	}
 	if err != nil {
 		http.Error(w, "ui missing", http.StatusInternalServerError)

@@ -106,6 +106,13 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 	c := &robotConn{id: id, ws: ws, send: make(chan outMsg, 32), done: make(chan struct{})}
 	if guest {
 		c.limits = newGuestLimits(now)
+	} else {
+		s.mu.Lock()
+		if !s.ownerRobots[id] {
+			s.ownerRobots[id] = true // the owner's robot: no account can claim this id
+			s.requestSave()
+		}
+		s.mu.Unlock()
 	}
 	defer c.close()
 

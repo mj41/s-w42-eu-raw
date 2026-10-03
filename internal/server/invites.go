@@ -84,6 +84,15 @@ func (ri *robotInvites) reload() error {
 	return nil
 }
 
+// has reports whether the file lists robot id.
+func (ri *robotInvites) has(id string) bool {
+	ri.mu.Lock()
+	defer ri.mu.Unlock()
+	ri.reload()
+	_, ok := ri.hashes[id]
+	return ok
+}
+
 // count is the number of invited robots in the file as last read.
 func (ri *robotInvites) count() int {
 	ri.mu.Lock()

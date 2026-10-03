@@ -24,22 +24,31 @@ import (
 	"github.com/mj41/stackchan-server/wire"
 )
 
-//go:embed ui/index.html ui/emoji
+//go:embed ui/index.html ui/robots.html ui/emoji
 var uiFS embed.FS
 
 // Config configures a Server.
 type Config struct {
-	RobotToken      string               // shared bearer token robots must present
-	RobotTokensFile string               // optional per-robot invite tokens (see invites.go); "" disables
-	TrustedProxies  int                  // reverse proxies in front that append to X-Forwarded-For (see clientIP); 0 ignores it
-	NoAddressLimits bool                 // the server cannot see client addresses (e.g. behind a TCP load balancer): no per-address limits
-	PublicURL       string               // base URL browsers use, e.g. http://192.168.1.10:8765
-	PairTTL         time.Duration        // lifetime of a pairing code
-	UIDir           string               // development: serve index.html from this directory instead of the embedded copy
-	StateFile       string               // JSON snapshot of pairings and robots, loaded by New (see state.go); "" disables
-	HTTPSPort       string               // port of the HTTPS listener for browsers, if any; advertised by /api/info
-	Offers          []wire.OfferedServer // other servers robots may switch to, sent as ServerOffer
-	Log             *slog.Logger
+	RobotToken      string // shared bearer token robots must present
+	RobotTokensFile string // optional per-robot invite tokens (see invites.go); "" disables
+	TrustedProxies  int    // reverse proxies in front that append to X-Forwarded-For (see clientIP); 0 ignores it
+	NoAddressLimits bool   // the server cannot see client addresses (e.g. behind a TCP load balancer): no per-address limits
+
+	// Sign-in (OpenID Connect, e.g. Dex at auth.w42.eu) for self-service robot invites
+	// (accounts.go). OIDCIssuer and OIDCClientID empty: no sign-in.
+	OIDCIssuer       string
+	OIDCClientID     string
+	OIDCClientSecret string
+	OIDCRedirectURL  string               // default PublicURL + /auth/callback
+	AdminEmails      []string             // verified e-mails without the per-account robot limit, who may remove any added robot
+	RobotsPerAccount int                  // default 3
+	PublicURL        string               // base URL browsers use, e.g. http://192.168.1.10:8765
+	PairTTL          time.Duration        // lifetime of a pairing code
+	UIDir            string               // development: serve index.html from this directory instead of the embedded copy
+	StateFile        string               // JSON snapshot of pairings and robots, loaded by New (see state.go); "" disables
+	HTTPSPort        string               // port of the HTTPS listener for browsers, if any; advertised by /api/info
+	Offers           []wire.OfferedServer // other servers robots may switch to, sent as ServerOffer
+	Log              *slog.Logger
 }
 
 // Server holds all state in memory. With Config.StateFile, pairings and known
@@ -52,6 +61,11 @@ type Server struct {
 	robots  map[string]*robotState // by robot id; kept after disconnect
 	codes   map[string]pairCode    // one-time pairing codes
 	invites *robotInvites          // per-robot invite tokens (nil: none)
+
+	oidc        *oidcLogin             // nil: no sign-in
+	logins      map[string]Account     // browser session id -> signed-in account
+	owned       map[string]ownedInvite // robot id -> invite added by an account
+	ownerRobots map[string]bool        // robot ids seen with the shared token: never claimable
 
 	robotFails *failLimiter               // failed robot logins per address
 	pairFails  *failLimiter               // wrong pairing codes per address
@@ -144,6 +158,10 @@ func New(cfg Config) *Server {
 		joinLastByIP: map[string]time.Time{},
 		robotFails:   newFailLimiter(maxRobotAuthFails, failWindow, cfg.NoAddressLimits),
 		pairFails:    newFailLimiter(maxPairFails, failWindow, cfg.NoAddressLimits),
+		oidc:         newOIDCLogin(cfg),
+		logins:       map[string]Account{},
+		owned:        map[string]ownedInvite{},
+		ownerRobots:  map[string]bool{},
 	}
 	if cfg.RobotTokensFile != "" {
 		s.invites = newRobotInvites(cfg.RobotTokensFile)
@@ -168,6 +186,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /pair", s.handlePair)
 	mux.HandleFunc("GET /api/robots", s.handleListRobots)
 	mux.HandleFunc("GET /api/info", s.handleInfo)
+	mux.HandleFunc("GET /robots", s.handleFleetPage)
+	mux.HandleFunc("GET /auth/login", s.handleLogin)
+	mux.HandleFunc("GET /auth/callback", s.handleAuthCallback)
+	mux.HandleFunc("POST /auth/logout", s.handleLogout)
+	mux.HandleFunc("GET /api/me", s.handleMe)
+	mux.HandleFunc("POST /api/my/robots", s.handleAddMyRobot)
+	mux.HandleFunc("DELETE /api/my/robots/{id}", s.handleRemoveMyRobot)
 	mux.HandleFunc("POST /api/join", s.handleJoinRequest)
 	mux.HandleFunc("POST /api/join/{id}/{decision}", s.handleJoinDecision)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
@@ -190,6 +215,9 @@ func (s *Server) robotAuth(id, token string) (ok, guest bool) {
 	invited, err := s.invites.ok(id, token)
 	if err != nil {
 		s.log.Warn("robot tokens file", "err", err)
+	}
+	if !invited {
+		invited = s.ownedInviteOK(id, token)
 	}
 	return invited, invited
 }

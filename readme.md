@@ -73,10 +73,36 @@ go run ./cmd/fake-robot                    # simulated robot, in a second termin
 - Open the dashboard with the same host as the QR code (e.g. `http://192.168.1.10:8765/`, not `localhost`). The pairing cookie belongs to that host.
 - Run `go test -race ./...` for the tests.
 
-### Other people's robots: invite tokens
+### Other people's robots: sign in and add your own
+
+With an OpenID Connect provider (on chan.w42.eu: Dex at `https://auth.w42.eu`, with GitHub
+and Google), people add their robots themselves on the **Your robots** page (`/robots`):
+sign in, enter the robot id, and the page shows that robot's invite token **once**, with the
+two `sdkconfig` lines to use. The server keeps only the token's SHA-256, bound to the
+account; the page also lists your robots (online or not), gives a new token (the old one
+stops working at once) and removes them.
+
+```bash
+stackchan-server -public-url https://chan.example \
+  -oidc-issuer https://auth.example -oidc-client-id chan -oidc-client-secret-file /secrets/oidc \
+  -admin-emails you@example.com -robots-per-account 3 -state-file /state/state.json
+```
+
+- Signing in gives no access to any robot: browsers still pair only by the code on the
+  robot's own screen.
+- An account may add `-robots-per-account` robots (default 3); `-admin-emails` (verified
+  e-mails) have no limit and may remove any added robot.
+- Ids of robots that connected with the shared token belong to the owner and cannot be
+  added; a robot added by one account cannot be added by another.
+- The login uses the authorization code flow with PKCE, a nonce and a one-time state bound
+  to the browser session; changing requests must come from this server's origin.
+- Accounts and added robots live in the state file (`-state-file`), so it must be on
+  persistent storage.
+
+### Other people's robots: invite tokens (without sign-in)
 
 The shared robot token is for your own robots: anyone who has it can connect a robot under
-any id, and it is compiled into the firmware. For other people's robots, give each robot
+any id, and it is compiled into the firmware. For other people's robots, without sign-in, give each robot
 its own **invite token**:
 
 ```bash
