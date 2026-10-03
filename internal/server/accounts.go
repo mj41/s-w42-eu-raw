@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
@@ -296,12 +297,34 @@ type myRobot struct {
 	Added   bool      `json:"added"` // false: one of the server's own robots (admins)
 }
 
+// robotURL is the address robots connect to: the public URL with ws:// or wss://.
+func (s *Server) robotURL() string {
+	return strings.Replace(strings.Replace(strings.TrimRight(s.cfg.PublicURL, "/"), "https://", "wss://", 1), "http://", "ws://", 1)
+}
+
+// robotURLReachable tells whether a robot can use robotURL: not when the public URL names
+// this computer only (localhost, 127.0.0.1, ::1), which on the robot is the robot itself.
+func (s *Server) robotURLReachable() bool {
+	u, err := url.Parse(s.cfg.PublicURL)
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	if h := u.Hostname(); strings.EqualFold(h, "localhost") || strings.HasSuffix(strings.ToLower(h), ".localhost") {
+		return false
+	}
+	if ip, err := netip.ParseAddr(u.Hostname()); err == nil && ip.IsLoopback() {
+		return false
+	}
+	return true
+}
+
 // GET /api/me
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	session := s.session(w, r)
 	a, ok := s.account(session)
 	if !ok {
-		writeJSON(w, http.StatusOK, map[string]any{"signed_in": false, "sign_in": s.oidc != nil})
+		writeJSON(w, http.StatusOK, map[string]any{"signed_in": false, "sign_in": s.oidc != nil,
+			"robot_url": s.robotURL(), "robot_reachable": s.robotURLReachable()})
 		return
 	}
 	s.mu.Lock()
@@ -326,6 +349,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"signed_in": true, "sign_in": true, "name": a.Name, "email": a.Email,
 		"admin": s.isAdmin(a), "limit": s.robotsPerAccount(), "robots": robots,
+		"robot_url": s.robotURL(), "robot_reachable": s.robotURLReachable(),
 	})
 }
 
@@ -400,7 +424,7 @@ func (s *Server) handleAddMyRobot(w http.ResponseWriter, r *http.Request) {
 	s.requestSave()
 	s.log.Info("robot added by account", "robot", id, "account", accountLogID(a.Key), "new_token", exists)
 
-	serverURL := strings.Replace(strings.Replace(strings.TrimRight(s.cfg.PublicURL, "/"), "https://", "wss://", 1), "http://", "ws://", 1)
+	serverURL := s.robotURL()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"robot_id": id, "token": token, "server_url": serverURL,
 		"sdkconfig": fmt.Sprintf("CONFIG_STACKCHAN_EMBODY_SERVER_URL=%q\nCONFIG_STACKCHAN_EMBODY_TOKEN=%q\n", serverURL, token),

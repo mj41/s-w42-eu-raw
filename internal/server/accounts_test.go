@@ -310,3 +310,25 @@ func TestFleetPageServed(t *testing.T) {
 		t.Fatalf("GET /robots: %d %.80s", resp.StatusCode, b)
 	}
 }
+
+func TestRobotURL(t *testing.T) {
+	for _, c := range []struct {
+		public, robot string
+		reachable     bool
+	}{
+		{"https://chan.example/", "wss://chan.example", true},
+		{"http://192.168.1.10:8765", "ws://192.168.1.10:8765", true},
+		{"http://localhost:8765", "ws://localhost:8765", false},
+		{"http://127.0.0.1:8799", "ws://127.0.0.1:8799", false},
+		{"http://[::1]:8765", "ws://[::1]:8765", false},
+		{"", "", false},
+	} {
+		s := &Server{cfg: Config{PublicURL: c.public}}
+		if got := s.robotURL(); got != c.robot {
+			t.Errorf("robotURL(%q) = %q, want %q", c.public, got, c.robot)
+		}
+		if got := s.robotURLReachable(); got != c.reachable {
+			t.Errorf("robotURLReachable(%q) = %v, want %v", c.public, got, c.reachable)
+		}
+	}
+}
