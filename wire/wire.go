@@ -163,7 +163,7 @@ type PairedBody struct {
 //	picture    {"asset"}                       a stored picture instead of the face
 //	play       {"asset", "volume": 0..100}     a stored WAV (16-bit PCM); "sound_done" at the end; play_stop ends it
 //	servo_power {"on": bool}                   power both head servos (off: limp)
-//	rotate     {"velocity": -1000..1000, "seconds": 1..30, "no_head_cable": true}  continuous yaw
+//	rotate     {"velocity": -1000..1000, "seconds": 1..30}  continuous yaw, confirmed on the robot's screen
 //	snapshot                                   full-resolution still, arrives as BinSnapshot
 //	camera_config {"mirror": bool, "flip": bool}
 //	camera_reg {"reg": n, "value": v}          raw sensor register write (optional) and read

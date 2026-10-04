@@ -204,6 +204,16 @@ async function toJpeg320(file) {
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("could not encode JPEG"))), "image/jpeg", 0.8));
 }
 
+// A black 320x240 JPEG: a clean background for a picture that has its own.
+function blackJpeg() {
+  const canvas = Object.assign(document.createElement("canvas"), { width: 320, height: 240 });
+  const g = canvas.getContext("2d");
+  g.fillStyle = "#000";
+  g.fillRect(0, 0, 320, 240);
+  return new Promise((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("could not encode JPEG"))), "image/jpeg", 0.8));
+}
+
 // An emoji drawn large in the middle of a black 320x240 JPEG.
 async function emojiJpeg(name) {
   // The files say 32x32; enlarge them first so the browser rasterizes the vectors at full size.
@@ -576,6 +586,24 @@ function makeCard(r) {
     const kb = (n) => (n / 1024).toFixed(n < 10240 ? 1 : 0) + " KB";
     const note = (text) => { log.textContent = (text + "\n" + log.textContent).split("\n").slice(0, 8).join("\n"); };
     const summary = el("span", { className: "muted", textContent: "…" });
+    // Pictures with their own background must not land on each other: with the box ticked, Show
+    // blacks out the screen (no face, no other sprites) and puts the picture in the middle.
+    // Without it, small ones with transparency (a heart) go over whatever is on the screen.
+    const onBlack = el("input", { type: "checkbox", checked: true });
+    const show = async (name) => {
+      const id = name.slice(-16);
+      if (onBlack.checked && has("image")) {
+        await run("sprite_clear", {}, "hide sprites");
+        const res = await fetch(`/api/robots/${encodeURIComponent(c.id)}/picture`,
+          { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: await blackJpeg() });
+        if (!res.ok) { note(`black background: ${(await res.text()).trim()}`); return; }
+        run("sprite", { id, asset: name, x: 160, y: 120, scale: 1 }, `show ${name} on black`);
+        return;
+      }
+      // over the face at a random place, gliding in from the middle
+      await run("sprite", { id, asset: name, x: 160, y: 120, scale: 1 }, "show " + name);
+      run("sprite", { id, x: 60 + Math.round(Math.random() * 200), y: 50 + Math.round(Math.random() * 140), ms: 600 }, "move " + name);
+    };
     c.onAssets = (d) => {
       let files = [];
       try { files = JSON.parse(d.list || "{}").files || []; } catch { /* keep empty */ }
@@ -585,11 +613,7 @@ function makeCard(r) {
       list.replaceChildren(...files.sort((a, b) => a.name.localeCompare(b.name)).map((f) => el("div", { className: "row", style: "margin-top:4px" }, [
         el("span", { className: "code", style: "min-width:180px", textContent: f.name }),
         el("span", { className: "muted", style: "font-size:0.85rem", textContent: `${kb(f.bytes)} · crc ${f.crc.toString(16).padStart(8, "0")}` }),
-        /\.(png|jpe?g)$/i.test(f.name) && has("sprite") && el("button", { className: "soft", textContent: "Show", onclick: () => {
-          // over the face at a random place, gliding in from the middle
-          run("sprite", { id: f.name.slice(-16), asset: f.name, x: 160, y: 120, scale: 1 }, "show " + f.name);
-          run("sprite", { id: f.name.slice(-16), x: 60 + Math.round(Math.random() * 200), y: 50 + Math.round(Math.random() * 140), ms: 600 }, "move " + f.name);
-        } }),
+        /\.(png|jpe?g)$/i.test(f.name) && has("sprite") && el("button", { className: "soft", textContent: "Show", onclick: () => show(f.name) }),
         /\.wav$/i.test(f.name) && has("play") && el("button", { className: "soft", textContent: "Play", onclick: () => run("play", { asset: f.name }, "play " + f.name) }),
         el("button", { className: "soft", textContent: "Delete", onclick: () => { if (confirm(`Delete ${f.name} on the robot?`)) run("asset_delete", { name: f.name }, "delete " + f.name); } }),
       ].filter(Boolean))));
@@ -624,10 +648,11 @@ function makeCard(r) {
         el("button", { className: "soft", textContent: "Upload", onclick: upload }),
         el("button", { className: "soft", textContent: "Refresh", onclick: () => run("assets", {}, "list files") }),
         has("sprite") && el("button", { className: "soft", textContent: "Hide sprites", onclick: () => run("sprite_clear", {}, "hide sprites") })].filter(Boolean)),
+      has("sprite") && has("image") && el("label", { className: "check muted" }, [onBlack, "Show on a black background (unticked: over what is on the screen)"]),
       log,
       el("div", { className: "muted", style: "font-size:0.85rem;margin-top:6px",
         textContent: "Pictures (PNG with transparency, JPEG) and sounds (WAV, 16-bit PCM) for apps, kept on the robot across reboots. Names: letters, digits, . _ - and / for folders." }),
-      list]);
+      list].filter(Boolean));
     sections.push(el("h2", { textContent: "Files" }), el("div", { className: "row" }, [summary,
       el("a", { href: "#files/" + encodeURIComponent(c.id), textContent: "Manage files" })]));
     c.refreshFiles = () => run("assets", {}, "list files");
@@ -1119,32 +1144,21 @@ function makeCard(r) {
       ]));
     }
     if (has("rotate")) {
-      // Continuous yaw: time-limited, and only after confirming that no cable is in the head's
-      // USB-C (the robot cannot tell the head port from the stand port).
-      const noCable = el("input", { type: "checkbox" });
+      // Continuous yaw, time-limited. The robot asks on its own screen first (only the person
+      // there can see whether a cable is in the head's USB-C); the Yes holds until a cable is
+      // plugged in or out.
       const speed = el("select", { className: "select", ariaLabel: "Rotation speed" },
         [["150", "Slow"], ["350", "Medium"], ["700", "Fast"]].map(([v, t]) => el("option", { value: v, textContent: t })));
       const secs = el("select", { className: "select", ariaLabel: "Rotation time" },
         [["3", "3 s"], ["10", "10 s"], ["30", "30 s"]].map(([v, t]) => el("option", { value: v, textContent: t })));
-      c.usbWarn = el("div", { className: "muted", style: "font-size:0.85rem", hidden: true,
-        textContent: "USB power is plugged in: rotate only if the cable is in the stand, not in the head." });
-      const spin = (dir) => {
-        if (!noCable.checked) { say("Tick “No cable in the head” first"); return; }
-        const args = { velocity: dir * +speed.value, seconds: +secs.value, no_head_cable: true };
-        // The robot refuses while USB power is in, unless the person confirms the stand.
-        if ((c.robot?.telemetry?.core_vbus_v || 0) > 1) {
-          if (!confirm("USB power is plugged in. Only rotate if the cable is in the stand, not in the head's USB-C. Rotate?")) return;
-          args.usb_power_ok = true;
-        }
-        run("rotate", args, `rotate ${dir > 0 ? "right" : "left"}`);
-      };
+      const spin = (dir) => run("rotate", { velocity: dir * +speed.value, seconds: +secs.value }, `rotate ${dir > 0 ? "right" : "left"}`);
       sections.push(el("div", { className: "row", style: "margin-top:8px" }, [
         el("span", { className: "muted", textContent: "Rotate" }),
         el("button", { className: "soft", textContent: "⟲", ariaLabel: "Rotate left", onclick: () => spin(-1) }),
         el("button", { className: "soft", textContent: "Stop", onclick: () => run("rotate", { velocity: 0 }, "rotate stop") }),
         el("button", { className: "soft", textContent: "⟳", ariaLabel: "Rotate right", onclick: () => spin(1) }),
         speed, secs,
-      ]), el("label", { className: "check muted" }, [noCable, "No cable in the head's USB-C"]), c.usbWarn);
+      ]));
     }
   }
 
@@ -1283,7 +1297,6 @@ function makeCard(r) {
     if (c.holdSel && r.telemetry.hold_s === 0 && c.holdSel.value !== "0" && document.activeElement !== c.holdSel) {
       c.holdSel.value = "0"; // the hold ran out on the robot
     }
-    if (c.usbWarn) c.usbWarn.hidden = !(r.telemetry.core_vbus_v > 1);
     if (c.proxLabel && "proximity_on" in r.telemetry) {
       c.proxLabel.hidden = false;
       if (Date.now() - (c.proxTouched || 0) > 4000) c.proxBox.checked = r.telemetry.proximity_on > 0;
@@ -1337,6 +1350,7 @@ function makeCard(r) {
       // e.g. rotate_refused: say it where the button was pressed, not only in Events
       status.textContent = ev.name.replaceAll("_", " ") + ((ev.data || {}).reason ? ": " + ev.data.reason : "");
     }
+    if (ev.name === "rotate_asking" && Date.now() - Date.parse(ev.ts) < 10000) status.textContent = "Confirm on the robot's screen: tap Yes to turn the head";
     if (ev.name === "ir_received" && c.onIr) c.onIr(ev.data || {});
     if (ev.name === "nfc_tag" && c.onNfc) c.onNfc(ev.data || {});
     if (ev.name === "servers" && c.onServers) c.onServers(ev.data || {});
