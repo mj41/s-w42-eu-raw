@@ -30,6 +30,7 @@ type mediaSub struct {
 	robot   string
 	session string
 	video   bool
+	full    bool // video at 640x480 (?size=640x480) instead of 320x240
 	audio   bool
 	imu     bool
 	touch   bool
@@ -95,10 +96,11 @@ func (s *Server) syncMedia(robotID string) {
 	if st == nil || st.conn == nil {
 		return
 	}
-	var wantVideo, wantAudio, wantIMU, wantTouch, wantLight bool
+	var wantVideo, wantFull, wantAudio, wantIMU, wantTouch, wantLight bool
 	for sub := range s.media {
 		if sub.robot == robotID {
 			wantVideo = wantVideo || sub.video
+			wantFull = wantFull || (sub.video && sub.full)
 			wantAudio = wantAudio || sub.audio
 			wantIMU = wantIMU || sub.imu
 			wantTouch = wantTouch || sub.touch
@@ -112,9 +114,18 @@ func (s *Server) syncMedia(robotID string) {
 			s.log.Info("media", "robot", robotID, command, on)
 		}
 	}
-	if wantVideo != st.cameraOn && slices.Contains(st.caps.Commands, "camera") {
-		st.cameraOn = wantVideo
-		send("camera", wantVideo)
+	if (wantVideo != st.cameraOn || wantFull != st.cameraFull) && slices.Contains(st.caps.Commands, "camera") {
+		// One size for all watchers: 640x480 while anyone asks for it.
+		st.cameraOn, st.cameraFull = wantVideo, wantFull
+		size := "320x240"
+		if wantFull {
+			size = "640x480"
+		}
+		f, err := wire.Marshal(wire.KindRobotCommand, wire.Meta{WorkerID: robotID},
+			wire.RobotCommandBody{Command: "camera", Args: map[string]any{"on": wantVideo, "size": size}})
+		if err == nil && st.conn.enqueue(f) {
+			s.log.Info("media", "robot", robotID, "camera", wantVideo, "size", size)
+		}
 	}
 	if wantAudio != st.micOn && slices.Contains(st.caps.Commands, "mic") {
 		st.micOn = wantAudio
@@ -140,7 +151,7 @@ func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
 	session := s.session(w, r)
 	id := r.PathValue("id")
 	q := r.URL.Query()
-	sub := &mediaSub{robot: id, session: session, video: q.Get("video") == "1", audio: q.Get("audio") == "1", imu: q.Get("imu") == "1", touch: q.Get("touch") == "1", light: q.Get("light") == "1",
+	sub := &mediaSub{robot: id, session: session, video: q.Get("video") == "1", full: q.Get("size") == "640x480", audio: q.Get("audio") == "1", imu: q.Get("imu") == "1", touch: q.Get("touch") == "1", light: q.Get("light") == "1",
 		out: make(chan []byte, 8)}
 
 	s.mu.Lock()
@@ -166,7 +177,7 @@ func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
 	s.media[sub] = struct{}{}
 	s.syncMedia(id)
 	s.mu.Unlock()
-	s.log.Info("media viewer joined", "robot", id, "video", sub.video, "audio", sub.audio)
+	s.log.Info("media viewer joined", "robot", id, "video", sub.video, "full", sub.full, "audio", sub.audio)
 	defer func() {
 		s.mu.Lock()
 		delete(s.media, sub)

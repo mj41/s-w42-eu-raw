@@ -961,6 +961,9 @@ function makeCard(r) {
       style: "width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:10px;background:#000;margin-top:8px" });
     const info = el("div", { className: "muted stats" });
     const watch = el("button", { className: "soft", textContent: "Watch" });
+    // The stream's size; 640x480 is about four times the data (one size for all watchers).
+    const vsize = el("select", { className: "select", ariaLabel: "Video size" },
+      [["320x240", "320×240"], ["640x480", "640×480"]].map(([v, t]) => el("option", { value: v, textContent: t })));
     const listen = el("button", { className: "soft", textContent: "Listen" });
 
     // Audio message: uint16 LE sample rate, then s16le mono PCM.
@@ -997,7 +1000,7 @@ function makeCard(r) {
       listen.textContent = media.audio ? "Stop audio" : "Listen";
       img.hidden = !media.video;
       if (!media.video && !media.audio) { info.textContent = ""; return; }
-      const q = `video=${media.video ? 1 : 0}&audio=${media.audio ? 1 : 0}`;
+      const q = `video=${media.video ? 1 : 0}&size=${vsize.value}&audio=${media.audio ? 1 : 0}`;
       const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/robots/${encodeURIComponent(c.id)}/media?${q}`);
       ws.binaryType = "arraybuffer";
       e2eAttach(ws, c.id);
@@ -1069,7 +1072,8 @@ function makeCard(r) {
       media.bytes = 0;
     }, 1000);
     sections.push(el("h2", { textContent: "Camera & mic" }),
-      el("div", { className: "row" }, [has("camera") && watch, has("mic") && listen, chanSel].filter(Boolean)), img, info);
+      el("div", { className: "row" }, [has("camera") && watch, has("camera") && vsize, has("mic") && listen, chanSel].filter(Boolean)), img, info);
+    vsize.onchange = () => { if (media.video) reopen(); };
     if (has("snapshot")) {
       // Full-resolution still: the robot switches the sensor to 640x480 for one frame.
       const shot = el("img", { alt: "Robot snapshot", hidden: true, style: "width:100%;border-radius:10px;margin-top:8px" });

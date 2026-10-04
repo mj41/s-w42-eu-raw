@@ -496,6 +496,35 @@ func TestMediaRelayPictureAndTap(t *testing.T) {
 	}
 }
 
+// The robot streams one size for all watchers: 640x480 while anyone asks for it.
+func TestMediaVideoSize(t *testing.T) {
+	ts, _ := newTestServer(t)
+	robot := connectRobot(t, ts, "chan-1", wire.ClassRobot)
+	browser := pairBrowser(t, robot)
+	expectCamera := func(on bool, size string) {
+		t.Helper()
+		var cmd wire.RobotCommandBody
+		robot.expect(wire.KindRobotCommand, &cmd)
+		if cmd.Command != "camera" || cmd.Args["on"] != on || cmd.Args["size"] != size {
+			t.Fatalf("robot got %+v, want camera on=%v size %s", cmd, on, size)
+		}
+	}
+	small, _, err := dialMedia(ts, browser, "chan-1", "video=1", ts.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectCamera(true, "320x240")
+	full, _, err := dialMedia(ts, browser, "chan-1", "video=1&size=640x480", ts.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectCamera(true, "640x480")
+	full.Close()
+	expectCamera(true, "320x240")
+	small.Close()
+	expectCamera(false, "320x240")
+}
+
 func TestRobotEventsReplayedToLateBrowsers(t *testing.T) {
 	ts, _ := newTestServer(t)
 	robot := connectRobot(t, ts, "chan-1", wire.ClassRobot)

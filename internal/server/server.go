@@ -106,6 +106,7 @@ type robotState struct {
 	telemetry   map[string]float64
 	telemetryAt time.Time
 	cameraOn    bool       // what the server last asked the robot
+	cameraFull  bool       // ... at 640x480
 	events      []sseEvent // recent robot_event messages, oldest first
 	eventSeq    uint64
 	// From the robot's "standby" event: when it plans to reconnect.
@@ -270,7 +271,7 @@ func (s *Server) attach(c *robotConn, reg wire.RegisterBody) {
 	st.labels = reg.Labels
 	st.lastSeen = time.Now()
 	// A fresh connection starts with camera and mic off (see handleRobotConnect).
-	st.cameraOn, st.micOn, st.imuOn, st.touchOn, st.lightOn = false, false, false, false, false
+	st.cameraOn, st.cameraFull, st.micOn, st.imuOn, st.touchOn, st.lightOn = false, false, false, false, false, false
 	st.standbyUntil = time.Time{} // back online
 	s.mu.Unlock()
 
