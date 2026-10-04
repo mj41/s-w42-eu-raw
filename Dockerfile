@@ -7,6 +7,7 @@ RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 COPY wire ./wire
+COPY e2e ./e2e
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/stackchan-server ./cmd/stackchan-server
 
 FROM gcr.io/distroless/static-debian12:nonroot
