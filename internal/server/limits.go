@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Limits for a server on the internet (chan.w42.eu): failed robot logins and wrong pairing
+// Limits for a server on the internet (raw.sa.w42.eu): failed robot logins and wrong pairing
 // codes per client address, and how much an invited (guest) robot may send.
 const (
 	failWindow        = 10 * time.Minute

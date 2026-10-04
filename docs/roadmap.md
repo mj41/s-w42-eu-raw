@@ -5,7 +5,7 @@
 ## Where it stands
 
 `s-w42-eu-raw` works and is used: one robot, every day, on a home network, with
-phones and laptops pairing by QR; the public instance at `chan.w42.eu` runs the same code. It is a **prototype** in these ways:
+phones and laptops pairing by QR; the public instance at `raw.sa.w42.eu` runs the same code. It is a **prototype** in these ways:
 
 | Area | Today | Why it matters |
 |---|---|---|
@@ -73,7 +73,7 @@ nothing else, and can read afterwards what was used.
   ending on the owner's own server.
 - **Compressed audio** (Opus) for the microphone and the speaker.
 - **Abuse limits:** done: failed robot logins and wrong pairing codes per address (with
-  `-trusted-proxies`, so a forged `X-Forwarded-For` cannot dodge it; chan.w42.eu gets real
+  `-trusted-proxies`, so a forged `X-Forwarded-For` cannot dodge it; raw.sa.w42.eu gets real
   client addresses through the PROXY protocol from its load balancer), message and byte
   budgets for invited robots, and browser limits per session, address and tier. Still open:
   short log retention on the public instance.

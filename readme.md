@@ -179,7 +179,7 @@ token (`token_file`).
 
 ## Running in a container
 
-A public instance runs at **https://chan.w42.eu**. To run your own:
+A public instance runs at **https://raw.sa.w42.eu** (robots set up on [sm.w42.eu](https://sm.w42.eu)). To run your own:
 
 1. **Image:** pushing a `v*` tag builds `ghcr.io/mj41/s-w42-eu-raw:<tag>`
    (`.github/workflows/release.yml`). Pin it by digest where you deploy it.

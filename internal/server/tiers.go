@@ -1,6 +1,6 @@
 package server
 
-// Tiers: how much a browser may use a server on the internet (chan.w42.eu). Access to a robot
+// Tiers: how much a browser may use a server on the internet (raw.sa.w42.eu). Access to a robot
 // does not depend on the tier (browsers pair by the code on the robot's screen, or a robot is
 // public); the tier sets the rate limits and the video size.
 // When a limit is hit, the answer says how to get more: anonymous people are asked to
