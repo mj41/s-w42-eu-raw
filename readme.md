@@ -220,6 +220,10 @@ go run ./cmd/stackchan-usb provision -url ws://192.168.1.10:8765 -name home \
 go run ./cmd/stackchan-usb provision -wifi-ssid Home -wifi-password-file wifi.txt
 go run ./cmd/stackchan-usb restart      # into Embody Mode
 go run ./cmd/stackchan-usb pair         # the pairing link the robot shows, to open in a browser
+# with automation in the firmware (the release has it): what a person at the robot does
+go run ./cmd/stackchan-usb screenshot -o screen.jpg
+go run ./cmd/stackchan-usb tap -x 268 -y 25        # the first tap asks on the robot's screen
+go run ./cmd/stackchan-usb launch -app "Embody Mode"
 ```
 
 - It finds the robot by its USB vendor (Espressif, 0x303A); `-port /dev/ttyACM1` picks another.
@@ -324,7 +328,7 @@ command table below.
 | `play` | `{"asset": "snd/hello.wav", "volume": 0..100}`: a stored WAV (16-bit PCM, mono or stereo, 4-48 kHz), streamed from the file so any length works; `sound_done` {asset} at the end, `sound_error` {asset, reason}; `play_stop` ends it |
 | `touch_stream`, `imu_stream`, `light_stream` | `{"on": bool}`: sent by the server while a browser has `?touch=1` / `?imu=1` / `?light=1` open (an app server such as [stackchan-pet](https://github.com/mj41/stackchan-pet) may send `light_stream` itself) |
 | `server_add` | `{"url": "ws://…" or "wss://…", "name", "token"}`: add (or update) an entry in the robot's server list, stored on the robot |
-| `server_remove`, `server_default`, `server_switch` | `{"server": url or name}`: remove an entry (not the built-in or current one), make it the one used at start (`""` = no default: the robot starts as a chooser), or switch to it now (the robot leaves this server) |
+| `server_remove`, `server_default`, `server_switch` | `{"server": url or name}`: remove an entry (not the built-in or current one), make it the one used at start (`""` = no default: the robot starts as a chooser), or switch to it now (the robot leaves this server). A new default or a switch is asked on the robot's screen first (`server_asking`; without a Yes `server_refused`) |
 | `proximity` | `{"on": bool}`: the proximity sensor, whose IR LED next to the camera pulses ~10×/s. Off stops the LED and the approach events; light and auto-brightness keep working. Telemetry `proximity_on` |
 | `power_led` | `{"mode": "on\|off\|blink\|fast\|charging"}`: the red power LED; `charging` hands it back to the charger |
 | `nfc` | `{"on": bool}`: NFC tag polling, on by default. Listed only when the robot found its reader |

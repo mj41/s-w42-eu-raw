@@ -8,10 +8,18 @@
 //	stackchan-usb provision -wifi-ssid Home -wifi-password-file wifi.txt
 //	stackchan-usb restart
 //	stackchan-usb pair                   the pairing link the robot shows (to open in a browser)
+//
+// With firmware built with automation, a program can also do what a person at the robot does
+// (but never answer the robot's own questions, e.g. a new default server or turning the head):
+//
+//	stackchan-usb screenshot -o screen.jpg   the screen as a JPEG
+//	stackchan-usb tap -x 160 -y 200 [-ms 800]  a tap (or a long press) on the screen
+//	stackchan-usb launch -app "Embody Mode"  restart into a launcher app ("launcher": none)
 package main
 
 import (
 	"bufio"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -34,7 +42,22 @@ func main() {
 	fs := flag.NewFlagSet(op, flag.ExitOnError)
 	port := fs.String("port", "", "serial port (default: the first Espressif USB device)")
 	var req map[string]any
+	out := ""
 	switch op {
+	case "screenshot":
+		o := fs.String("o", "screen.jpg", "where to save the JPEG")
+		fs.Parse(args)
+		req, out = map[string]any{"op": op}, *o
+	case "tap":
+		x := fs.Int("x", -1, "x, 0..319 (left to right)")
+		y := fs.Int("y", -1, "y, 0..239 (top to bottom)")
+		ms := fs.Int("ms", 100, "how long to press, ms (a long press: 800)")
+		fs.Parse(args)
+		req = map[string]any{"op": op, "x": *x, "y": *y, "ms": *ms}
+	case "launch":
+		app := fs.String("app", "Embody Mode", `a launcher app's name ("AVATAR", "Embody Mode", ...) or "launcher"`)
+		fs.Parse(args)
+		req = map[string]any{"op": op, "app": *app}
 	case "hello", "restart", "pair":
 		fs.Parse(args)
 		req = map[string]any{"op": op}
@@ -84,15 +107,26 @@ func main() {
 	if err != nil {
 		fail("%v", err)
 	}
-	out, _ := json.MarshalIndent(res, "", "  ")
-	fmt.Println(string(out))
+	if b64, ok := res["jpeg"].(string); ok && out != "" {
+		jpeg, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			fail("screenshot: %v", err)
+		}
+		if err := os.WriteFile(out, jpeg, 0o644); err != nil {
+			fail("%v", err)
+		}
+		delete(res, "jpeg")
+		res["saved"] = fmt.Sprintf("%s (%d bytes)", out, len(jpeg))
+	}
+	pretty, _ := json.MarshalIndent(res, "", "  ")
+	fmt.Println(string(pretty))
 	if ok, _ := res["ok"].(bool); !ok {
 		os.Exit(1)
 	}
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: stackchan-usb hello | provision [flags] | restart | pair   (-h for flags)")
+	fmt.Fprintln(os.Stderr, "usage: stackchan-usb hello | provision [flags] | restart | pair | screenshot | tap | launch   (-h for flags)")
 	os.Exit(2)
 }
 
@@ -137,6 +171,7 @@ func talk(name string, req map[string]any) (map[string]any, error) {
 	lines := make(chan string, 64)
 	go func() {
 		sc := bufio.NewScanner(p)
+		sc.Buffer(make([]byte, 64<<10), 1<<20) // a screenshot is one ~40 KB line
 		for sc.Scan() {
 			lines <- sc.Text()
 		}

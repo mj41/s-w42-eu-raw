@@ -1356,6 +1356,7 @@ function makeCard(r) {
       status.textContent = ev.name.replaceAll("_", " ") + ((ev.data || {}).reason ? ": " + ev.data.reason : "");
     }
     if (ev.name === "rotate_asking" && Date.now() - Date.parse(ev.ts) < 10000) status.textContent = "Confirm on the robot's screen: tap Yes to turn the head";
+    if (ev.name === "server_asking" && Date.now() - Date.parse(ev.ts) < 10000) status.textContent = "Confirm on the robot's screen: tap Yes to change its server";
     if (ev.name === "ir_received" && c.onIr) c.onIr(ev.data || {});
     if (ev.name === "nfc_tag" && c.onNfc) c.onNfc(ev.data || {});
     if (ev.name === "servers" && c.onServers) c.onServers(ev.data || {});
