@@ -107,7 +107,7 @@
   <section class="card" id="backupbox" hidden>
     <h2 id="backuptitle">Backup of the original firmware</h2>
     <p id="backuptext">Keep this file: with it, the robot can go back to the firmware it had (Options, Firmware,
-    "Restore the original firmware"). It also holds the robot's settings from before, such as
+    "Restore an earlier firmware"). It also holds the robot's settings from before, such as
     Wi-Fi passwords, so keep it private.</p>
     <p><a id="backuplink">backup</a></p>
   </section>
@@ -125,7 +125,7 @@
       official Embody Mode <span class="muted" id="fwversion"></span> (recommended)</span></label>
     <label class="radio"><input type="radio" name="fw" value="keep"> <span>Keep the robot's firmware
       (it must already have Embody Mode with setup over USB)</span></label>
-    <label class="radio"><input type="radio" name="fw" value="restore"> <span>Restore the original firmware
+    <label class="radio"><input type="radio" name="fw" value="restore"> <span>Restore an earlier firmware
       from the backup file a setup saved</span></label>
     <input type="file" id="restorefile" accept=".bin" hidden>
 
@@ -551,11 +551,11 @@ $("start").onclick = async () => {
 
   const backup = fw === "latest" && $("backup").checked;
   const names = ["Connect to the robot"];
-  if (restore) names.push("Check the backup", "Restore the original firmware", "Restart");
+  if (restore) names.push("Check the backup", "Restore the firmware", "Restart");
   else {
     if (backup) names.push("Back up the current firmware");
     if (fw === "latest") names.push("Install the firmware");
-    names.push("Read the robot's id", own ? "Use your server" : localSetup && !me.signed_in ? "Use this server" : "Add the robot to your account", "Write the settings", "Restart into Embody Mode");
+    names.push("Read the robot's id", own ? "Use your server" : localSetup && !me.signed_in ? "Use this server" : "Add the robot to your account", "Write the settings (confirm on the robot)", "Restart into Embody Mode");
     if (own || !me.signed_in) names.push("Pair this browser");
   }
   let port;
@@ -590,9 +590,12 @@ $("start").onclick = async () => {
     }
     if (restore) {
       step(s++);
-      if (!before?.original?.sha256) throw new Error("This robot has no record of its original firmware, so this page cannot check the file. Restore it from a terminal: esptool.py write_flash 0x0 <backup file>.");
+      const records = [before?.original, before?.previous].filter((r) => r?.sha256);
+      if (!records.length) throw new Error("This robot has no record of its earlier firmware, so this page cannot check the file. Restore it from a terminal: esptool.py write_flash 0x0 <backup file>.");
       const data = new Uint8Array(await $("restorefile").files[0].arrayBuffer());
-      if (data.length !== FLASH_SIZE || await sha256(data) !== before.original.sha256) throw new Error("This file is not the backup of this robot's original firmware (its checksum differs).");
+      const sum = await sha256(data);
+      const match = data.length === FLASH_SIZE && records.find((r) => r.sha256 === sum);
+      if (!match) throw new Error("This file is not a backup this robot recorded (original or previous firmware): its checksum differs.");
       step(s++);
       session = await installer(port);
       await writeFlash(session.loader, [{ data, address: 0 }]);
@@ -602,13 +605,13 @@ $("start").onclick = async () => {
       robot = new Robot(port);
       await robot.open({ reset: true });
       step(s);
-      $("donetext").textContent = `The robot restarts with its original firmware (${before.original.project || "?"} ${before.original.version || ""}).`;
+      $("donetext").textContent = `The robot restarts with its ${match === before.original ? "original" : "previous"} firmware (${match.project || "?"} ${match.version || ""}, saved ${match.saved || "?"}).`;
       $("donelink").hidden = true;
       $("done").hidden = false;
       $("progressbox").hidden = true;
       return;
     }
-    let original = null;
+    let original = null, previous = null;
     if (fw === "latest") {
       const files = await firmwareFiles();
       session = await installer(port);
@@ -624,12 +627,13 @@ $("start").onclick = async () => {
         const mac = (await session.loader.chip.readMac(session.loader)).replace(/:/g, "").toLowerCase();
         const now = new Date(), day = now.toISOString().slice(0, 10);
         const stamp = `${day}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
-        if (first) original = { ...identify(image), sha256: await sha256(image), size: image.length, saved: day };
+        const record = { ...identify(image), sha256: await sha256(image), size: image.length, saved: day };
+        if (first) original = record;
         else {
+          previous = record;
           $("backuptitle").textContent = "Backup of the robot's previous firmware";
           $("backuptext").textContent = "The firmware the robot had until now, with its settings (Wi-Fi passwords too: keep it private). " +
-            "Put it back from a terminal: esptool.py write_flash 0x0 <file>. The page itself restores only the original firmware, " +
-            `saved ${before.original.saved || "at the first setup"}.`;
+            "Options, Firmware, \"Restore\" puts it back; so does a terminal: esptool.py write_flash 0x0 <file>.";
         }
         offerDownload(new Blob([image]), `stackchan-${mac}-${first ? "original" : "backup"}-${stamp}.bin`);
       }
@@ -664,10 +668,16 @@ $("start").onclick = async () => {
     if (others.length) req.servers = others.map(({ name, url, token }) => ({ name, url, token: token || "" }));
     if (pin !== server.url) req.pin = pin;
     if (original) req.original = original;
+    if (previous) req.previous = previous;
     if ($("ssid").value.trim()) req.wifi = { ssid: $("ssid").value.trim(), password: $("wifipass").value };
     else if (pasted?.wifi?.ssid) req.wifi = pasted.wifi;
-    const p = await robot.ask(req, 15000);
-    if (!p.ok) throw new Error("The robot refused the settings: " + (p.error || "unknown"));
+    // Sent once (the robot answered hello already): a new default server waits for a tap on the
+    // robot, and repeated copies would pile up in its USB buffer meanwhile.
+    log("provision: a new default server asks on the robot's screen; tap Yes there\n");
+    const p = await robot.ask(req, 75000, false);
+    if (!p.ok) throw new Error(/not confirmed/.test(p.error || "")
+      ? "Not confirmed on the robot: tap Yes on its screen when it asks (within a minute). Nothing was changed."
+      : "The robot refused the settings: " + (p.error || "unknown"));
     step(s++);
     await robot.ask({ op: "restart" }, 8000, false).catch(() => {});
     // Pair this browser through the robot's own link, so the app opens ready (a signed-in

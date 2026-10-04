@@ -122,8 +122,10 @@ func findPort() (string, error) {
 	return "", errors.New("no Stackchan on USB: plug it in with a data cable (USB-C on the head)")
 }
 
-// talk sends one request and waits for its answer. Opening the port can restart the robot,
-// so the request is repeated until the robot answers (it boots in a few seconds).
+// talk sends one request and waits for its answer. Opening the port can restart the robot, so
+// hello is repeated until the robot answers (it boots in a few seconds); then the request goes
+// once: a provision that changes the default server waits for a tap on the robot's screen, and
+// repeated copies would pile up in its USB buffer meanwhile.
 func talk(name string, req map[string]any) (map[string]any, error) {
 	p, err := serial.Open(name, &serial.Mode{BaudRate: 115200})
 	if err != nil {
@@ -131,7 +133,6 @@ func talk(name string, req map[string]any) (map[string]any, error) {
 	}
 	defer p.Close()
 	p.SetReadTimeout(500 * time.Millisecond)
-	line, _ := json.Marshal(req)
 	lines := make(chan string, 64)
 	go func() {
 		sc := bufio.NewScanner(p)
@@ -140,31 +141,46 @@ func talk(name string, req map[string]any) (map[string]any, error) {
 		}
 		close(lines)
 	}()
-	deadline := time.After(25 * time.Second)
-	resend := time.NewTicker(2 * time.Second)
-	defer resend.Stop()
-	send := func() { p.Write([]byte(prefix + string(line) + "\n")) }
-	send()
-	for {
-		select {
-		case l, ok := <-lines:
-			if !ok {
-				return nil, errors.New("the robot went away")
+	send := func(r map[string]any) {
+		line, _ := json.Marshal(r)
+		p.Write([]byte(prefix + string(line) + "\n"))
+	}
+	answer := func(timeout time.Duration, resend func()) (map[string]any, error) {
+		deadline := time.After(timeout)
+		tick := time.NewTicker(2 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case l, ok := <-lines:
+				if !ok {
+					return nil, errors.New("the robot went away")
+				}
+				i := strings.Index(l, prefix)
+				if i < 0 {
+					continue // a log line
+				}
+				var res map[string]any
+				if json.Unmarshal([]byte(l[i+len(prefix):]), &res) == nil {
+					return res, nil
+				}
+			case <-tick.C:
+				if resend != nil {
+					resend()
+				}
+			case <-deadline:
+				return nil, errors.New("no answer: is the robot on, with firmware that has USB setup (Embody Mode 2026-10 or newer)?")
 			}
-			i := strings.Index(l, prefix)
-			if i < 0 {
-				continue // a log line
-			}
-			var res map[string]any
-			if json.Unmarshal([]byte(l[i+len(prefix):]), &res) == nil {
-				return res, nil
-			}
-		case <-resend.C:
-			if req["op"] != "restart" { // provision and hello are safe to repeat
-				send()
-			}
-		case <-deadline:
-			return nil, errors.New("no answer: is the robot on, with firmware that has USB setup (Embody Mode 2026-10 or newer)?")
 		}
 	}
+	hello := map[string]any{"op": "hello"}
+	send(hello)
+	first, err := answer(25*time.Second, func() { send(hello) })
+	if err != nil || req["op"] == "hello" {
+		return first, err
+	}
+	send(req)
+	if req["op"] == "provision" {
+		fmt.Fprintln(os.Stderr, "stackchan-usb: if the robot asks on its screen, tap Yes (within a minute)")
+	}
+	return answer(75*time.Second, nil)
 }
