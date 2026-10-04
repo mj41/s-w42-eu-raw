@@ -35,9 +35,9 @@ For each paired robot:
 - **Live touch** (under Sensors): both fingers on the screen, drawn live (50 Hz) from the raw touch controller data. Events `touch_down` / `touch_up` (with duration) come from the same data.
 - **Camera extras:** "Snapshot 640×480" (shown below the video, with a download link), Mirror / Flip, and raw sensor registers (read / write, answer in Events).
 - **Servers:** the robot's server list (built-in, offered by servers with `-offer`, or added here with name, URL and robot token), with Switch, Pin as default / Unpin and Remove. Tokens never leave the robot. On the robot, the QR screen switches with Next and Pin makes the shown server the default (tap again to unpin; with no default the robot starts as a chooser and contacts nothing until you press Connect).
-- **Head extras:** Servo power on/off, and Rotate ⟲ / Stop / ⟳ (continuous yaw, 3–30 s, only after ticking "No cable in the head's USB-C"; with USB power present the dashboard warns again).
+- **Head extras:** Servo power on/off, and Rotate ⟲ / Stop / ⟳ (continuous yaw, Slow/Medium/Fast, 3/10/30 s; the robot asks on its own screen first).
 - **Live IMU** (under Sensors): raw accelerometer, gyro and magnetometer at 100 Hz while the button is on (the robot streams only while someone watches), with "Download CSV" of up to 60 s.
-- **Camera & mic:** live video (JPEG, about 5 fps) and the robot's microphone, played through Web Audio. The robot streams only while someone watches or listens, and shows a red LIVE badge meanwhile.
+- **Camera & mic:** live video (JPEG, about 5 fps; 320×240, or 640×480 for tiers 1–3; one size for all watchers) and the robot's microphone, played through Web Audio. The robot streams only while someone watches or listens, and shows a red LIVE badge meanwhile.
 - **Speaker:** "Talk" (tap to start, tap again to stop) streams your microphone to the robot, "Play sound file" plays any audio file the browser can decode, and "Beep" is a test tone. Audio is resampled to 24 kHz in the browser and the robot's mouth moves while it plays. Browsers give the microphone only to secure pages: use `http://localhost` on the server machine, or run the server with `-tls-listen :8766` and open `https://<LAN IP>:8766` on the phone (the plain page links to it; accept the self-signed certificate warning once). Files and Beep work anywhere.
 - **Infrared:** point a TV remote at the robot and press a button: the last code shows up with "Send again" and "Save…" (a named button, kept in this browser). "NEC address / command" sends a code by hand (a received NEC code fills it in), and "Add to list" saves it under a name, so you can try a few commands side by side. "Tap / Hold 0.5–2 s" sets how long every send holds the button (default 0.5 s: frame plus repeat codes, like a real press). "Send 3×" sends the whole code three times, for when the robot's weak IR LED only sometimes gets through. "Test LED (3 s)" lights the IR LED long enough to see it through a phone camera; "Self-test" checks that the robot hears its own signal (carrier and timing).
 - **Power LED** (under LEDs): on, blink, fast, off, or "Charging" (the charger drives it).
@@ -71,7 +71,7 @@ go run ./cmd/fake-robot                    # simulated robot, in a second termin
 - `-offer name=wss://host[,tokenfile]` (repeatable) offers robots other servers they may switch to; with a token file, the robot also gets that server's robot token. Offers are voluntary: a server decides where its robots may go, and the robot owner can also add servers by hand. Offers go only to robots with the shared token, never to invited robots (below).
 - `-robot-tokens-file <file>`: other people's robots, each with its own invite token (see "Other people's robots" below). Off by default.
 - `-trusted-proxies 1` behind one reverse proxy that appends the client address to `X-Forwarded-For` (Envoy, nginx with `$proxy_add_x_forwarded_for`). The default 0 ignores that header, because clients can forge it. Limits and logs use the address.
-- **Limits:** 20 failed logins per address and robot id in 10 minutes, then HTTP 429 for that robot from that address, right token included (other robots behind the same address keep working); 20 wrong pairing codes per address in 10 minutes, then 429. Invited robots may send 300 messages/s and 512 KB/s on average (bursts of 1000 messages and 4 MB), and are disconnected above that; the owner's robots are not limited. Browsers: at most 8 open event streams per session and 30 per address, 4 media sockets per session and robot and 20 per address, and 20 commands, pictures or uploads per second per session (bursts of 60); above that HTTP 429.
+- **Limits:** 20 failed logins per address and robot id in 10 minutes, then HTTP 429 for that robot from that address, right token included (other robots behind the same address keep working); 20 wrong pairing codes per address in 10 minutes, then 429. Invited robots may send 300 messages/s and 512 KB/s on average (bursts of 1000 messages and 4 MB), and are disconnected above that; the owner's robots are not limited. Browsers: at most 8 open event streams per session and 30 per address, and 20 media sockets per address; media sockets per session and robot, and commands, pictures or uploads per second per session, depend on the tier (**Tiers** in [Other people's robots](#other-peoples-robots-sign-in-and-add-your-own); without sign-in everybody is tier 1: 4 sockets, 20 per second, bursts of 60); above that HTTP 429.
 - `-no-address-limits` turns the per-address limits off, for a server that cannot see client addresses (behind a TCP load balancer without the PROXY protocol, every client has the balancer's address, and one stranger's failures would lock everybody out). The send budgets for invited robots stay.
 - `-firmware-release latest` (the default; or a tag such as `embody-v0.1.0`, `""` for none): the official Embody Mode firmware for the setup page `/setup` (see "Set a robot up over USB" below), fetched from the [GitHub release](https://github.com/mj41/StackChan/releases), every part checked against the manifest's SHA-256, and kept in `~/.cache/stackchan-server/firmware`. `-firmware-dir <dir>` serves the same files from a directory instead. On a server with sign-in, only signed-in people get them.
 - `-ui-dir internal/server/ui` serves the dashboard from disk on every request (development). UI edits then need only a page reload.
@@ -101,7 +101,7 @@ stackchan-server -public-url https://chan.example \
   private". The owner can make a robot **public** on the Your robots page: then the code
   pairs anyone, as on a server without sign-in. Making it private again unpairs everybody
   else. Anonymous browsers cannot send "Ask a paired phone" requests, so they bother nobody.
-- Without sign-in configured (a LAN server), every robot is public, as before.
+- Without sign-in configured (a LAN server), every robot is public.
 - **Tiers** set the limits (not access: pairing still needs the robot's code, or a public
   robot):
 
@@ -128,8 +128,9 @@ stackchan-server -public-url https://chan.example \
   `email:` (and `-admin-emails`) match only e-mails verified by GitHub or Google (not Microsoft: a tenant admin can set any e-mail there); `github:` (login) and `github-id:` (user id) match
   only through Dex's GitHub connector (scope `federated:id`). Without sign-in (a LAN server)
   everybody is tier 1.
-- Ids of robots that connected with the shared token belong to the owner and cannot be
-  added; a robot added by one account cannot be added by another.
+- Ids of robots that connected with the shared token belong to the owner: other accounts
+  cannot add them; an admin may add one, which from then on uses its own token. A robot
+  added by one account cannot be added by another.
 - The login uses the authorization code flow with PKCE, a nonce and a one-time state bound
   to the browser session; changing requests must come from this server's origin.
 - Accounts and added robots live in the state file (`-state-file`), so it must be on
@@ -138,8 +139,9 @@ stackchan-server -public-url https://chan.example \
 ### Other people's robots: invite tokens (without sign-in)
 
 The shared robot token is for your own robots: anyone who has it can connect a robot under
-any id, and it is compiled into the firmware. For other people's robots, without sign-in, give each robot
-its own **invite token**:
+any id. It is compiled into your own firmware build or written over USB; the release firmware
+has no token. For other people's robots, without sign-in, give each robot its own **invite
+token**:
 
 ```bash
 stackchan-server invite stackchan-0a1b2c3d4e50   # the robot id its screen shows (stackchan-<MAC>)
@@ -157,8 +159,13 @@ token>`) goes into the file you pass as `-robot-tokens-file`; the file holds no 
 - Browsers still pair only by the code on the robot's own screen, so an invite gives a robot
   a place on the server, not anyone access to it.
 - Invited robots have send limits (above, "Limits").
-- Still to do (see the [roadmap](docs/roadmap.md)): end-to-end encryption through a public
-  server.
+
+### End-to-end encryption
+
+The server relays the sealed `E2E*` frames and the binary `0x30`/`0x31` messages between a
+robot and its paired browsers without reading them
+([e2ee.md](https://github.com/mj41/home-w42-eu/blob/main/docs/e2ee.md)). The browser side is
+the dashboard's `e2e.js`; `go run ./cmd/fake-robot -e2e` tests it without hardware.
 
 ## Set a robot up over USB
 
@@ -166,50 +173,42 @@ No firmware build and no token in the firmware: the robot keeps its server list,
 Wi-Fi in its settings, and a computer writes them over the USB cable. Having the robot on the
 cable is the proof of ownership, like scanning its QR code.
 
-**In Chrome or Edge: `/setup`** (e.g. [chan.w42.eu/setup](https://chan.w42.eu/setup)).
-Plug the robot in (the USB-C port on its head, a data cable), sign in, press **Set up my
-robot** and pick the "USB JTAG/serial debug unit". The page then:
+**In Chrome or Edge: `/setup`** (e.g. [chan.w42.eu/setup](https://chan.w42.eu/setup)). The
+page backs up the robot's firmware, installs the official firmware (Web Serial and
+[esptool-js](https://github.com/espressif/esptool-js)), and writes the server, the robot's
+token and Wi-Fi into it. The steps for users are in
+[SETUP.md](https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/SETUP.md):
+A (chan.w42.eu) and B (your own server). What this server does for it:
 
-1. saves a **backup of the robot's current firmware** ("Back up the current firmware first", on
-   by default): the whole flash as one file for address 0x0, downloaded by the browser (e.g. to
-   `~/Downloads`); erased blocks are skipped, so it takes about two minutes. The first backup is
-   the robot's **original**: the robot keeps its identity and SHA-256, and the page can put it
-   back. Later ones (`…-backup-<date>-<time>.bin`) are the firmware it had until then, restored
-   from a terminal (`esptool.py write_flash 0x0 <file>`),
-2. installs the official Embody Mode firmware (Web Serial and
-   [esptool-js](https://github.com/espressif/esptool-js), checked against the SHA-256 in the
-   manifest; the robot's settings stay),
-3. reads the robot id over the cable and adds the robot to your account with a new token,
-4. writes this server, the token and, if you give it, your Wi-Fi into the robot, and restarts
-   it into Embody Mode. **Start Embody Mode when the robot turns on** (off by default) sets
-   autostart; **App** picks the server the robot starts with (pinned as its default): the
-   dashboard, or another app the server offers (`-offer`, e.g. Pet or Sbot), which the robot
-   also gets with their tokens,
-5. after which the robot connects. It is private to you: open the dashboard on this server,
-   signed in, and it is there (or scan the QR code on its screen with a signed-in phone).
+- **With sign-in,** the page adds the robot to the signed-in account (`POST /api/my/robots`)
+  with a new token; the robot is private to that account.
+- **Without sign-in, on the server's own computer** (`http://localhost:8765/setup`),
+  `POST /api/setup/local` gives the page this server's address (the `-public-url`, by default
+  `ws://<LAN IP>:8765`), its robot token, the other apps it offers (`-offer`, e.g. Pet or Sbot,
+  with their tokens) and this computer's Wi-Fi (name and password from NetworkManager on Linux
+  or netsh on Windows; only the name on macOS). It answers only same-origin requests from a
+  browser on the same computer (loopback address and host name, no proxy). **Copy setup for
+  another computer** on that page gives the same as JSON, for the setup page elsewhere
+  (Options, Server, "My own server"); it holds the robot token and the Wi-Fi password, so keep
+  it private:
 
-**Your own server:** open its setup page on the computer it runs on,
-`http://localhost:8765/setup`, and press the button: the server fills in its address (the
-`-public-url`, by default `ws://<LAN IP>:8765`), its robot token and this computer's Wi-Fi
-(name and password from NetworkManager on Linux or netsh on Windows; only the name on macOS).
-Nothing to type. It hands those out only without sign-in, and only to a browser on the same
-computer (loopback address and host name, no proxy). To set a robot up from another computer,
-press **Copy setup for another computer** there and paste it into the setup page elsewhere (Options,
-Server, "My own server"; chan.w42.eu/setup too):
+  ```json
+  {"server": {"name": "192.168.1.10:8765", "url": "ws://192.168.1.10:8765", "token": "…"},
+   "apps": [{"name": "Pet", "url": "ws://192.168.1.10:8770", "token": "…"}],
+   "wifi": {"ssid": "Home", "password": "…"}}
+  ```
 
-```json
-{"server": {"name": "192.168.1.10:8765", "url": "ws://192.168.1.10:8765", "token": "…"},
- "apps": [{"name": "Pet", "url": "ws://192.168.1.10:8770", "token": "…"}],
- "wifi": {"ssid": "Home", "password": "…"}}
-```
+- **App** on the page (when there is more than the dashboard, i.e. from your own server's
+  setup) picks the server the robot starts with, pinned as its default.
 
-It holds the robot token and the Wi-Fi password: keep it private.
-
-**Options** on the same page: Wi-Fi (sent only to the robot, never to the server), keep the
-robot's firmware (e.g. your own build, flashed from a terminal), **restore the original
-firmware** from the backup file (only the file whose SHA-256 the robot recorded; or from a
-terminal, `esptool.py write_flash 0x0 <file>`), and your own server. The page installs only the
-official firmware, never an uploaded image.
+**The firmware.** `/setup` installs only the official `embody-v*` release of
+[mj41/StackChan](https://github.com/mj41/StackChan/releases) (`manifest.json` and its parts,
+built by CI from the one firmware source with its release configuration), never an uploaded
+image. The server fetches it (`-firmware-release`) or serves it from `-firmware-dir`, at
+`/firmware/{file}`; the server and the page both check every part against the manifest's
+SHA-256. On a server with sign-in, only signed-in people get it. The release has no server and
+no token inside: those are the robot's settings, written over USB. Until it is set up, the
+robot's Embody Mode shows "Set up: chan.w42.eu/setup".
 
 **From a terminal: `stackchan-usb`**, the same over USB for developers and scripts (the robot
 must already have firmware with USB setup):
@@ -220,21 +219,16 @@ go run ./cmd/stackchan-usb provision -url ws://192.168.1.10:8765 -name home \
   -token-file ~/.config/stackchan-server/robot-token -default -autostart
 go run ./cmd/stackchan-usb provision -wifi-ssid Home -wifi-password-file wifi.txt
 go run ./cmd/stackchan-usb restart      # into Embody Mode
+go run ./cmd/stackchan-usb pair         # the pairing link the robot shows, to open in a browser
 ```
 
 - It finds the robot by its USB vendor (Espressif, 0x303A); `-port /dev/ttyACM1` picks another.
 - Secrets come from files, never from the command line.
+- A `provision` that changes the default server asks on the robot's screen first: tap Yes
+  within a minute, or nothing is changed.
 - `-autostart` needs firmware built with automation (the release build has it).
 - The protocol: lines `@stackchan <JSON>` on the USB serial port, described in the firmware's
   [usb_setup.h](https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/usb_setup.h).
-
-**The firmware.** `/setup` installs the official `embody-v*` release of
-[mj41/StackChan](https://github.com/mj41/StackChan/releases) (`manifest.json` and its parts,
-built by CI from the one firmware source with its release configuration; the server and the page
-both check every part against the manifest's SHA-256), fetched by the server
-(`-firmware-release`) or from `-firmware-dir`. The release has no
-server and no token inside: those are the robot's settings, written over USB. Until it is set
-up, the robot's Embody Mode shows "Set up: chan.w42.eu/setup".
 
 ## Running in a container
 
@@ -259,29 +253,41 @@ What any host needs:
 
 ## Protocol
 
-This is the device wire protocol v1. Its reference specification is [wire-protocol.md](https://github.com/mj41/home-w42-eu/blob/main/docs/wire-protocol.md) in home-w42-eu; the tables below are this server's view of it.
+This is the device wire protocol v1. Its reference specification is [wire-protocol.md](https://github.com/mj41/home-w42-eu/blob/main/docs/wire-protocol.md) in home-w42-eu; the sections below are this server's view of it.
 
 **Connect:** `ws://<server>/api/devices/connect` with these headers:
 
 - `Authorization: Bearer <robot token>`
 - `X-Device-Id: <robot id>`: 1–64 of `[A-Za-z0-9._-]`.
 
-### JSON frames
+### Frames
 
-Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...}, "body": {...}}`.
+Every WebSocket text message is one JSON frame, `{"kind", "meta", "body"}`; the kinds and
+their bodies are in [wire-protocol.md §4](https://github.com/mj41/home-w42-eu/blob/main/docs/wire-protocol.md#4-frame-kinds).
+What this server adds:
 
-| Direction | Kind | Body |
-|---|---|---|
-| robot → server | `Register` (must be first) | `{"class": "robot", "capabilities": {"model", "firmware", "commands": [...], "measurements": [...]}}` |
-| robot → server | `RobotTelemetry` | `{"measurements": {"battery_pct": 87.5}}` (values are numbers) |
-| robot → server | `RobotEvent` | `{"name", "data"}`: `shake`, `head_press` with zone intensities `{"z0", "z1", "z2"}` (0–3), `head_release` with `{"ms"}`, `head_swipe_forward`, `head_swipe_backward`, `screen_tap` with `{"x", "y"}` (anywhere on the face, its eyes and mouth included), `screensaver_on` with `{"manual": 0 or 1}`, `screensaver_off`, `standby` with `{"minutes"}`, `standby_end` with `{"touched"}`, `nfc_tag` with `{"uid": "04:A2:…", "type", "atqa", "sak"}` plus `"text"` when the tag holds an NDEF URI or text record, `nfc_removed` with `{"uid"}`, `proximity_near` / `proximity_far` with `{"value"}`, `ir_received` with `{"protocol": "nec" or "raw", "address", "command", "raw"}` (raw marks/spaces in µs, always present), `screen_long_press` with `{"x", "y"}` (free for apps), `servers` with `{"list": JSON array of {name, url, origin, token: bool}, "current", "default"}`, `power_button` with `{"press": "short" or "long"}`, `usb_plugged` / `usb_unplugged`, `battery_inserted` / `battery_removed`. Values are numbers or strings. Browsers also get a per-robot `seq` |
-| robot → server | `RobotPong` | `{"id", "queue_ms"}`: answer to `ping`; `queue_ms` is time spent waiting on the robot |
-| robot → server | `Heartbeat` | `{}`, every 30 s |
-| server → robot | `Accepted` / `Rejected` | `{}` / `{"reason": "..."}` |
-| server → robot | `PairCode` | `{"code", "url", "expires_in_s"}`: show `url` as a QR code |
-| server → robot | `Paired` | `{"viewers": 1}`: after a pairing, and right after `Accepted` when browsers are already paired (pairings survive restarts), so the robot starts with its face instead of the QR screen |
-| server → robot | `RobotCommand` | `{"command": "nod", "args": {}}` |
-| server → robot | `ServerOffer` | `{"servers": [{"name", "url", "token"?}]}`: other servers this server lets its robots switch to (from `-offer`), sent after `Accepted` |
+- `Register` must be the first frame.
+- `Paired` comes after a pairing, and right after `Accepted` when browsers are already paired
+  (pairings survive restarts), so the robot starts with its face instead of the QR screen.
+- `ServerOffer` (from `-offer`) comes after `Accepted`, only to robots with the shared token.
+- `E2E*` frames are relayed unread ([End-to-end encryption](#end-to-end-encryption)).
+- Browsers get each `RobotEvent` with a per-robot `seq`.
+
+### Events
+
+`RobotEvent` names a Stackchan sends, with `data` (values are numbers or strings): `shake`,
+`head_press` with zone intensities `{"z0", "z1", "z2"}` (0–3), `head_release` with `{"ms"}`,
+`head_swipe_forward`, `head_swipe_backward`, `screen_tap` with `{"x", "y"}` (anywhere on the
+face, its eyes and mouth included), `screensaver_on` with `{"manual": 0 or 1}`,
+`screensaver_off`, `standby` with `{"minutes"}`, `standby_end` with `{"touched"}`, `nfc_tag`
+with `{"uid": "04:A2:…", "type", "atqa", "sak"}` plus `"text"` when the tag holds an NDEF URI
+or text record, `nfc_removed` with `{"uid"}`, `proximity_near` / `proximity_far` with
+`{"value"}`, `ir_received` with `{"protocol": "nec" or "raw", "address", "command", "raw"}`
+(raw marks/spaces in µs, always present), `screen_long_press` with `{"x", "y"}` (free for
+apps), `servers` with `{"list": JSON array of {name, url, origin, token: bool}, "current",
+"default"}`, `power_button` with `{"press": "short" or "long"}`, `usb_plugged` /
+`usb_unplugged`, `battery_inserted` / `battery_removed`. Answers to commands are in the
+command table below.
 
 ### Commands
 
@@ -329,35 +335,55 @@ Every WebSocket text message is one JSON object: `{"kind": "...", "meta": {...},
 
 ### Binary messages
 
-The first byte is the type, followed by the payload.
+The first byte is the type; the types and their payloads are in
+[wire-protocol.md §6](https://github.com/mj41/home-w42-eu/blob/main/docs/wire-protocol.md#6-binary-message-types).
+How this server uses them:
 
-| Type | Direction | Payload |
-|---|---|---|
-| `0x01` | robot → server → browser | camera frame, JPEG |
-| `0x02` | robot → server → browser | microphone: sample rate (uint16 LE), then s16le mono PCM |
-| `0x04` | robot → server → browser | microphone, all codec channels: sample rate (uint16 LE), channel count (uint8), then interleaved s16le PCM (on StackChan: channel 1 is the microphone, channel 0 the speaker reference, i.e. what the robot plays, looped back for echo cancellation; the dashboard plays either one) |
-| `0x05` | robot → server → browser | raw IMU while a browser has `?imu=1` open: count (uint16 LE), then per sample time (uint32 LE ms) and 9 float32 LE: accel m/s², gyro °/s, magnetic µT |
-| `0x06` | robot → server → browser | raw touch frames while a browser has `?touch=1` open: frame count (uint16 LE), then per frame time (uint32 LE ms), n (uint8) and n × (id uint8, x uint16 LE, y uint16 LE) |
-| `0x08` | robot → server → browser | raw light and proximity every 50 ms while a browser has `?light=1` open: sample count (uint16 LE), then per sample time (uint32 LE ms), proximity (uint16 LE, 0..2047, 0 while off), light CH0 visible+IR and CH1 IR (uint16 LE raw counts); the sensor runs fast (proximity 50 ms, light 100 ms) only while streaming |
-| `0x07` | robot → server | full-resolution JPEG still (the `snapshot` command); the server keeps the latest and serves it at `GET /api/robots/{id}/snapshot` (SSE `snapshot` `{"robot", "bytes", "ts"}`) |
-| `0x03` | browser → server → robot | speaker: sample rate (uint16 LE), then s16le mono PCM. Sent on the media socket; forwarded only to robots that list `speaker` |
-| `0x10` | server → robot | picture, JPEG 320x240, shown instead of the face |
-| `0x11` | server → robot | part of a file for the robot's file store: name length (uint8), name (e.g. `food/cake.png`), total size and offset (uint32 LE each), data; sent in order in 32 KB chunks by `POST /api/robots/{id}/assets?name=…` (header `X-Stackchan-Upload: 1`, the file as the body, max 2 MB) |
+- **From the robot to browsers** on the media socket (`/api/robots/{id}/media`): camera
+  `0x01`, microphone `0x02` / `0x04`, and `0x05` (IMU), `0x06` (touch), `0x08` (light and
+  proximity, every 50 ms) only while a browser has `?imu=1` / `?touch=1` / `?light=1` open.
+  On StackChan, `0x04` channel 1 is the microphone and channel 0 the speaker reference (what
+  the robot plays, looped back for echo cancellation); the dashboard plays either one.
+- **`0x07`** (the `snapshot` command's still): the server keeps the latest in memory, serves
+  it at `GET /api/robots/{id}/snapshot` and tells browsers with the SSE event `snapshot`
+  `{"robot", "bytes", "ts"}`.
+- **`0x03`** (speaker) from a browser's media socket goes only to robots that list `speaker`.
+- **`0x10`** (picture): a JPEG, 320×240, from `POST /api/robots/{id}/picture` (up to 192 KB).
+- **`0x11`** (file chunks): from `POST /api/robots/{id}/assets?name=…` (header
+  `X-Stackchan-Upload: 1`, the file as the body, up to 2 MB), sent in order in 32 KB chunks.
+- **`0x30` / `0x31`** (end to end encrypted, robot → browsers / browser → robot): relayed
+  unread.
 
 ### Browser API
 
-All endpoints need the session cookie of a browser that paired with the robot.
+Every browser gets a session cookie. Endpoints under `/api/robots/{id}` need a session paired
+with that robot, `/api/my/*` a signed-in one; requests that change something must come from
+this server's origin.
 
 | Endpoint | Purpose |
 |---|---|
+| `GET /`, `GET /robots`, `GET /setup` | the dashboard, Your robots (sign-in), and the USB setup page |
 | `GET /pair?code=…` | QR target; adds the robot to this browser's session |
+| `GET /api/info` | about this server: `https_url` when it has an HTTPS listener (`-tls-listen`) |
+| `GET /api/me` | sign-in state, tier and its hint, whether 640×480 video is allowed; signed in also the account, its robot limit and robots |
+| `GET /auth/login`, `GET /auth/callback`, `POST /auth/logout` | sign-in with the OpenID Connect provider (only with `-oidc-issuer`) |
+| `POST /api/my/robots` | `{"robot_id"}`: add a robot to your account, or a new token for one of yours; returns `{"robot_id", "token", "server_url", "sdkconfig"}` |
+| `DELETE /api/my/robots/{id}` | remove one of your robots (admins: any added robot); it is disconnected |
+| `POST /api/my/robots/{id}/access` | `{"public": bool}`: make your robot public or private (private unpairs everybody else) |
+| `POST /api/setup/local` | the setup for a robot of this server (above, [Set a robot up over USB](#set-a-robot-up-over-usb)); only without sign-in, from the same computer (loopback) |
+| `GET /firmware/{file}` | the official firmware for `/setup` (`manifest.json` and its parts); with sign-in, only for signed-in people |
 | `POST /api/join` | an unpaired browser asks paired browsers for access; returns `{"id", "code", "from", "agent", "expires"}`. Paired browsers get a `join_request` SSE event (also replayed when they connect) |
 | `POST /api/join/{id}/approve`, `…/deny` | a paired browser answers; approve pairs the requester with the approver's robots. The requester gets `join_result` `{"status"}`, the other paired browsers `join_closed` |
 | `GET /api/robots` | paired robots (JSON) |
-| `GET /api/events` | SSE: `robot` (full state; telemetry `screensaver` 0 off / 1 auto / 2 manual), `robot_event` and `command_sent` (`{"robot", "seq", "command", "args", "ts"}`: what a browser sent; both go to every paired browser, and the last 40 are replayed on connect), `pong` (only to the browser that pinged), `join_request` / `join_closed` / `join_result` (see `/api/join`) |
+| `GET /api/events` | SSE: `robot` (full state; telemetry `screensaver` 0 off / 1 auto / 2 manual), `robot_event` and `command_sent` (`{"robot", "seq", "command", "args", "ts"}`: what a browser sent; both go to every paired browser, and the last 40 are replayed on connect), `pong` (only to the browser that pinged), `snapshot`, `e2e` (a robot's sealed frame), `join_request` / `join_closed` / `join_result` (see `/api/join`) |
 | `POST /api/robots/{id}/command` | `{"command", "args"}` as JSON |
 | `POST /api/robots/{id}/picture` | `image/jpeg` body, up to 192 KB |
-| `GET /api/robots/{id}/media?video=1&audio=1&imu=1` | WebSocket, same origin only, carrying binary `0x01` (video), `0x02`/`0x04` (audio), `0x05` (imu) for what was asked; the server turns camera, mic and IMU stream on while at least one browser wants them |
+| `POST /api/robots/{id}/e2e` | `{"kind": "E2EEnroll\|E2EHello\|E2ECommand", "body"}`: a sealed frame for the robot, relayed unread |
+| `GET /api/robots/{id}/media?video=1&audio=1` | WebSocket, same origin only, carrying the binary messages that were asked for: `video=1` (`size=640x480` for the larger stream, tiers 1–3), `audio=1`, `imu=1`, `touch=1`, `light=1`; the server turns the robot's streams on while at least one browser wants them. Browsers send speaker audio (`0x03`) on it |
+| `GET /api/robots/{id}/snapshot` | the latest full-resolution still (JPEG) |
+| `POST /api/robots/{id}/assets?name=…` | a file for the robot's file store (above, `0x11`) |
+| `GET /e2e.js`, `GET /vendor/{file}`, `GET /emoji/…` | the dashboard's scripts and emoji |
+| `GET /healthz` | `ok`, for health checks |
 
 **Liveness:** the server sends a WebSocket ping every 5 s and drops the robot after 60 s without traffic. Reconnect with backoff from 1 s up to 30 s.
 
@@ -365,10 +391,9 @@ All endpoints need the session cookie of a browser that paired with the robot.
 
 ## Status
 
-A prototype, in daily use with one robot on a home network since 2026-09-29. It is not
-yet safe on untrusted networks: one shared robot token, no per-person permissions, plain
-`ws://` on the LAN. The way to a v1, in stages with clear goals, is in
-[docs/roadmap.md](docs/roadmap.md).
+A prototype. Sign-in, per-robot tokens, private robots, tiers and an end-to-end relay are
+in; still open: the shared owner token, permissions per capability, an external review. See
+the [roadmap](docs/roadmap.md).
 
 ## Related projects
 

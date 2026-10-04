@@ -1,22 +1,21 @@
 # From prototype to v1
 
-**Status:** plan, 2026-10-02.
+**Status:** plan; updated with each release.
 
 ## Where it stands
 
-`stackchan-server` works and is used: one robot, every day, on a home network since
-2026-09-29, with phones and laptops pairing by QR; the public instance at
-`chan.w42.eu` runs the same code. It is a **prototype** in these ways:
+`stackchan-server` works and is used: one robot, every day, on a home network, with
+phones and laptops pairing by QR; the public instance at `chan.w42.eu` runs the same code. It is a **prototype** in these ways:
 
 | Area | Today | Why it matters |
 |---|---|---|
-| Robot identity | one shared token for the owner's robots, compiled into the firmware; other people's robots each get their own invite token | reading one of the owner's robots' flash gives the token for all of them |
-| Permissions | a paired browser may use every command and see all data | no guests, no "camera only for parents", no time limits |
-| Network | plain `ws://` and `http://` on the LAN; TLS only behind a proxy | anyone on the network can listen |
+| Robot identity | the owner's robots share one token; other robots get per-robot tokens (accounts, invites); the release firmware has no token, it is written over USB | reading one of the owner's robots' flash gives the token for all of them |
+| Permissions | with sign-in, robots are private to their owner by default, with a public toggle; tiers set the limits; a paired browser may use every command and see all data | no guests, no "camera only for parents", no time limits |
+| Network | plain `ws://` and `http://` on the LAN (`-tls-listen` for browsers only); TLS otherwise only behind a proxy | anyone on the network can listen |
 | State | in memory, plus a JSON snapshot on restart; one instance only | a crash or a deploy loses live state |
 | Audio | raw PCM, about 48 KB/s | too heavy for mobile networks |
-| Quality checks | tests run on the developer's machine; CI only builds release images | the v0.2.0 image build broke without anyone noticing before the tag |
-| Abuse | join requests, failed robot logins and wrong pairing codes are limited per address; invited robots have send budgets; browsers' streams and commands are limited per session and address | an external review is still to come |
+| Quality checks | tests run on the developer's machine; CI only builds release images | the v0.2.0 and v0.10.0 image builds broke without anyone noticing before the tag (v0.10.0: the Dockerfile lacked the `e2e` package) |
+| Abuse | join requests, failed robot logins and wrong pairing codes are limited per address; invited robots have send budgets; browsers' streams and commands are limited per session, address and tier | an external review is still to come |
 
 ## Stages
 
@@ -42,10 +41,10 @@ works, CI is green, and the fuzzers have run without findings.
 
 ### 2. Each robot its own identity
 
-**First step, done 2026-10-03:** per-robot invite tokens (`-robot-tokens-file`,
-`stackchan-server invite`): each invited robot has its own token, bound to its id, revoked
-by deleting one line; the server keeps only the tokens' hashes. They are still bearer
-tokens in the firmware, so the steps below remain.
+**First step, done:** per-robot tokens, for robots added by signed-in accounts and for
+invited robots (`-robot-tokens-file`, `stackchan-server invite`): each bound to its robot id
+and revocable on its own; the server keeps only the tokens' hashes. They are still bearer
+tokens on the robot, so the steps below remain.
 
 - An **owner key** and a small tool that signs robot certificates and configuration.
 - A **device key per robot** (in its storage first, in the ESP32-S3's secure key
@@ -68,16 +67,16 @@ nothing else, and can read afterwards what was used.
 
 ### 4. Safe on the internet
 
-- **End-to-end encryption through the public instance:** `chan.w42.eu` becomes a
-  rendezvous and relay that cannot read robot or browser traffic; TLS ends on the
-  owner's own server.
+- **End-to-end encryption through the public instance:** the relay is done: the server
+  passes sealed frames and media between a robot and its browsers without reading them
+  ([e2ee.md](https://github.com/mj41/home-w42-eu/blob/main/docs/e2ee.md)). Still open: TLS
+  ending on the owner's own server.
 - **Compressed audio** (Opus) for the microphone and the speaker.
-- **Abuse limits:** connection and pairing rate limits per address, size and frequency
-  limits on every message, and short log retention on the public instance. *Started
-  2026-10-03:* failed robot logins and wrong pairing codes are limited per address (with
-  `-trusted-proxies` so a forged `X-Forwarded-For` cannot dodge it), and invited robots
-  have message and byte budgets. chan.w42.eu sees real client addresses since
-  2026-10-03 (the PROXY protocol from its load balancer), so all of them apply there.
+- **Abuse limits:** done: failed robot logins and wrong pairing codes per address (with
+  `-trusted-proxies`, so a forged `X-Forwarded-For` cannot dodge it; chan.w42.eu gets real
+  client addresses through the PROXY protocol from its load balancer), message and byte
+  budgets for invited robots, and browser limits per session, address and tier. Still open:
+  short log retention on the public instance.
 - **An external security review** of the protocol and the server.
 
 **Done when:** the public instance can be offered to people we do not know without
@@ -87,8 +86,9 @@ reading or storing their traffic, and the review's findings are fixed.
 
 - **Wire protocol v2** frozen, with the compatibility rule written down: which firmware
   versions a server accepts, and for how long.
-- **Releases** with signed container images and a software bill of materials; the robot
-  firmware built in a pinned container, reproducibly, so anyone can compare hashes.
+- **Releases** with signed container images and a software bill of materials. The robot
+  firmware is already built reproducibly in a pinned container, so anyone can compare
+  hashes ([mj41cz-approved](https://gitlab.com/mj41cz/mj41cz-approved)).
 - **Documentation** for owners (setup, everyday use, privacy) and for app developers (the
   protocol, the command catalog, an example app).
 
@@ -97,6 +97,5 @@ re-pairing.
 
 ## Not planned
 
-- Accounts on our servers: owners keep their own keys; the public instance does not need
-  to know who they are.
+- Accounts that hold owners' keys: sign-in only names who adds a robot and the tier.
 - Recording by default: media streams only while someone watches or listens, as today.
