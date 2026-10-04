@@ -31,7 +31,7 @@ const (
 
 	// Binary message types (wire protocol §6).
 	BinGroup   byte = 0x30 // robot -> browsers: epoch u32 | nonce | AES-GCM(G, inner type + payload)
-	BinBrowser byte = 0x31 // browser -> robot: browser id (8) | nonce | AES-GCM(K_B, payload)
+	BinBrowser byte = 0x31 // browser -> robot: browser id (8) | nonce | AES-GCM(K_B, inner type + payload)
 
 	fragmentPrefix = "e2e=1."
 	enrollLabel    = "w42-e2e-enroll|"
