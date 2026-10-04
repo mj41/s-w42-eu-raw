@@ -7,6 +7,7 @@
 //	stackchan-usb provision -url wss://chan.w42.eu -name chan.w42.eu -token-file token.txt -default -autostart
 //	stackchan-usb provision -wifi-ssid Home -wifi-password-file wifi.txt
 //	stackchan-usb restart
+//	stackchan-usb pair                   the pairing link the robot shows (to open in a browser)
 package main
 
 import (
@@ -34,7 +35,7 @@ func main() {
 	port := fs.String("port", "", "serial port (default: the first Espressif USB device)")
 	var req map[string]any
 	switch op {
-	case "hello", "restart":
+	case "hello", "restart", "pair":
 		fs.Parse(args)
 		req = map[string]any{"op": op}
 	case "provision":
@@ -91,7 +92,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: stackchan-usb hello | provision [flags] | restart   (-h for flags)")
+	fmt.Fprintln(os.Stderr, "usage: stackchan-usb hello | provision [flags] | restart | pair   (-h for flags)")
 	os.Exit(2)
 }
 
@@ -180,7 +181,7 @@ func talk(name string, req map[string]any) (map[string]any, error) {
 	}
 	send(req)
 	if req["op"] == "provision" {
-		fmt.Fprintln(os.Stderr, "stackchan-usb: if the robot asks on its screen, tap Yes (within a minute)")
+		fmt.Fprintln(os.Stderr, "stackchan-usb: if the robot asks on its screen, tap Yes to accept or No to refuse (within a minute)")
 	}
 	return answer(75*time.Second, nil)
 }
