@@ -442,7 +442,7 @@ func (s *Server) handleAddMyRobot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	if s.ownerRobots[id] {
+	if s.ownerRobots[id] && !s.isAdmin(a) {
 		s.mu.Unlock()
 		http.Error(w, "this robot id belongs to the server's owner", http.StatusConflict)
 		return
@@ -467,6 +467,7 @@ func (s *Server) handleAddMyRobot(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.owned[id] = ownedInvite{RobotID: id, Hash: hash, Owner: a.Key, OwnerName: a.Name, Created: time.Now()}
+	delete(s.ownerRobots, id) // an admin added their own robot: from now on it uses its own token
 	if !exists {
 		delete(s.public, id) // a newly added robot starts private
 	}

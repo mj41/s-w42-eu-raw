@@ -46,6 +46,8 @@
   ol.steps li.now { color: var(--text); font-weight: 600; }
   ol.steps li.done { color: var(--ok); }
   ol.steps li.done::marker { content: "✓  "; }
+  ol.steps li.fail { color: var(--warn); font-weight: 600; }
+  ol.steps li.fail::marker { content: "✗  "; }
   progress { width: 100%; height: 10px; accent-color: var(--accent); }
   .error { color: var(--warn); font-weight: 600; margin-top: 8px; white-space: pre-wrap; }
   .foot { color: var(--muted); font-size: 0.85rem; margin: 32px 0 8px; line-height: 1.6; }
@@ -703,6 +705,8 @@ $("start").onclick = async () => {
     $("done").hidden = false;
     $("progressbox").hidden = true;
   } catch (e) {
+    const now = $("steps").querySelector("li.now");
+    if (now) now.className = "fail"; // the step that failed, in red, not left looking busy
     $("error").textContent = /Failed to open serial port/.test(e.message || "")
       ? "The robot's USB port is busy: another tab or program uses it (another setup page, idf.py monitor, stackchan-usb). Close it and press the button again."
       : e.message || String(e);

@@ -266,6 +266,15 @@ func TestAdminHasNoLimit(t *testing.T) {
 			t.Fatalf("admin add %d: %d", i, code)
 		}
 	}
+	// The admin's own robot (seen with the shared token) can be added to the admin's account:
+	// the setup page does that; then it connects with its own token.
+	connectRobot(t, ts, "stackchan-owner00001", wire.ClassRobot)
+	time.Sleep(50 * time.Millisecond)
+	code, token := boss.addRobot("stackchan-owner00001")
+	if code != http.StatusOK {
+		t.Fatalf("admin adds their own robot: %d", code)
+	}
+	registerGuest(t, ts, token, "stackchan-owner00001")
 }
 
 func TestCallbackChecks(t *testing.T) {
