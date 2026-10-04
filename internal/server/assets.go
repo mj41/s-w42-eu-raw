@@ -7,7 +7,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/mj41/stackchan-server/wire"
+	"github.com/mj41/s-w42-eu-raw/wire"
 )
 
 // Uploads to the robot's file store (pictures and sounds on its userdata

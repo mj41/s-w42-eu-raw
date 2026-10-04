@@ -1,4 +1,4 @@
-module github.com/mj41/stackchan-server
+module github.com/mj41/s-w42-eu-raw
 
 go 1.26.0
 

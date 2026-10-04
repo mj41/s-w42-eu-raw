@@ -1,4 +1,4 @@
-// Command stackchan-server relays between Stackchan robots and browsers.
+// Command s-w42-eu-raw relays between Stackchan robots and browsers.
 //
 // Robots connect to ws://<host>/api/devices/connect with a bearer token.
 // Browsers open http://<host>/ and pair by scanning the robot's QR code.
@@ -6,7 +6,7 @@
 // microphone, which browsers allow only on secure pages).
 //
 // Other people's robots: with -robot-tokens-file, each listed robot connects with its own
-// invite token. `stackchan-server invite <robot id>` makes one.
+// invite token. `s-w42-eu-raw invite <robot id>` makes one.
 package main
 
 import (
@@ -28,8 +28,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mj41/stackchan-server/internal/server"
-	"github.com/mj41/stackchan-server/wire"
+	"github.com/mj41/s-w42-eu-raw/internal/server"
+	"github.com/mj41/s-w42-eu-raw/wire"
 )
 
 func main() {
@@ -47,7 +47,7 @@ func main() {
 		tlsListen      = flag.String("tls-listen", "", "also serve browsers over HTTPS on this address, e.g. :8766 (robots stay on -listen)")
 		tlsCert        = flag.String("tls-cert", defaultConfigFile("tls-cert.pem"), "TLS certificate for -tls-listen; a self-signed one is created if missing")
 		tlsKey         = flag.String("tls-key", defaultConfigFile("tls-key.pem"), "TLS key for -tls-listen")
-		invites        = flag.String("robot-tokens-file", "", "per-robot invite tokens: lines \"<robot id> <sha256 of its token>\", read again when changed (\"\" disables; see `stackchan-server invite`)")
+		invites        = flag.String("robot-tokens-file", "", "per-robot invite tokens: lines \"<robot id> <sha256 of its token>\", read again when changed (\"\" disables; see `s-w42-eu-raw invite`)")
 		proxies        = flag.Int("trusted-proxies", 0, "reverse proxies in front of this server that append the client address to X-Forwarded-For (1 behind one gateway); 0 ignores the header, which clients can forge")
 		noAddrLim      = flag.Bool("no-address-limits", false, "turn off the per-address limits (failed logins, wrong pairing codes): for a server that cannot see client addresses, e.g. behind a TCP load balancer without the PROXY protocol, where every client would share one address")
 		oidcIssuer     = flag.String("oidc-issuer", "", "sign-in: OpenID Connect issuer, e.g. https://auth.w42.eu (\"\" disables sign-in and self-service robot invites)")
@@ -148,7 +148,7 @@ func main() {
 		httpSrv.Shutdown(shutdownCtx)
 	}()
 
-	log.Info("stackchan-server listening", "listen", *listen, "public_url", *publicURL, "token_file", *tokenFile, "state_file", *stateFile)
+	log.Info("s-w42-eu-raw listening", "listen", *listen, "public_url", *publicURL, "token_file", *tokenFile, "state_file", *stateFile)
 	if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("server", "err", err)
 		os.Exit(1)
@@ -262,7 +262,7 @@ func (o *offerFlags) Set(v string) error {
 // invite prints a new invite token for one robot and the line for -robot-tokens-file.
 func invite(args []string) int {
 	if len(args) != 1 || strings.HasPrefix(args[0], "-") {
-		fmt.Fprintln(os.Stderr, "usage: stackchan-server invite <robot id>   (e.g. stackchan-0a1b2c3d4e50)")
+		fmt.Fprintln(os.Stderr, "usage: s-w42-eu-raw invite <robot id>   (e.g. stackchan-0a1b2c3d4e50)")
 		return 2
 	}
 	token, line, err := server.NewRobotInvite(args[0])

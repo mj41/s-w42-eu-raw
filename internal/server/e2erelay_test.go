@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/mj41/stackchan-server/e2e"
-	"github.com/mj41/stackchan-server/wire"
+	"github.com/mj41/s-w42-eu-raw/e2e"
+	"github.com/mj41/s-w42-eu-raw/wire"
 )
 
 var rawB64 = base64.RawURLEncoding

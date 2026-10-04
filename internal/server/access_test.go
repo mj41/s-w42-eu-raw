@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mj41/stackchan-server/wire"
+	"github.com/mj41/s-w42-eu-raw/wire"
 )
 
 // robotWithCode connects a robot and returns it with its current pairing code.

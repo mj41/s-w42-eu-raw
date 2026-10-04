@@ -1,20 +1,20 @@
-// Command stackchan-usb sets up a Stackchan over its USB cable: it reads the robot id and
+// Command s-w42-eu-usb sets up a Stackchan over its USB cable: it reads the robot id and
 // writes a server, its token, autostart and Wi-Fi into the robot's settings (firmware with
 // Embody Mode's USB setup; protocol in its usb_setup.h). The same thing chan.w42.eu/setup
 // does in Chrome, for developers, own servers and custom firmware.
 //
-//	stackchan-usb hello
-//	stackchan-usb provision -url wss://chan.w42.eu -name chan.w42.eu -token-file token.txt -default -autostart
-//	stackchan-usb provision -wifi-ssid Home -wifi-password-file wifi.txt
-//	stackchan-usb restart
-//	stackchan-usb pair                   the pairing link the robot shows (to open in a browser)
+//	s-w42-eu-usb hello
+//	s-w42-eu-usb provision -url wss://chan.w42.eu -name chan.w42.eu -token-file token.txt -default -autostart
+//	s-w42-eu-usb provision -wifi-ssid Home -wifi-password-file wifi.txt
+//	s-w42-eu-usb restart
+//	s-w42-eu-usb pair                   the pairing link the robot shows (to open in a browser)
 //
 // With firmware built with automation, a program can also do what a person at the robot does
 // (but never answer the robot's own questions, e.g. a new default server or turning the head):
 //
-//	stackchan-usb screenshot -o screen.jpg   the screen as a JPEG
-//	stackchan-usb tap -x 160 -y 200 [-ms 800]  a tap (or a long press) on the screen
-//	stackchan-usb launch -app "Embody Mode"  restart into a launcher app ("launcher": none)
+//	s-w42-eu-usb screenshot -o screen.jpg   the screen as a JPEG
+//	s-w42-eu-usb tap -x 160 -y 200 [-ms 800]  a tap (or a long press) on the screen
+//	s-w42-eu-usb launch -app "Embody Mode"  restart into a launcher app ("launcher": none)
 package main
 
 import (
@@ -126,12 +126,12 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: stackchan-usb hello | provision [flags] | restart | pair | screenshot | tap | launch   (-h for flags)")
+	fmt.Fprintln(os.Stderr, "usage: s-w42-eu-usb hello | provision [flags] | restart | pair | screenshot | tap | launch   (-h for flags)")
 	os.Exit(2)
 }
 
 func fail(format string, a ...any) {
-	fmt.Fprintf(os.Stderr, "stackchan-usb: "+format+"\n", a...)
+	fmt.Fprintf(os.Stderr, "s-w42-eu-usb: "+format+"\n", a...)
 	os.Exit(1)
 }
 
@@ -216,7 +216,7 @@ func talk(name string, req map[string]any) (map[string]any, error) {
 	}
 	send(req)
 	if req["op"] == "provision" {
-		fmt.Fprintln(os.Stderr, "stackchan-usb: if the robot asks on its screen, tap Yes to accept or No to refuse (within a minute)")
+		fmt.Fprintln(os.Stderr, "s-w42-eu-usb: if the robot asks on its screen, tap Yes to accept or No to refuse (within a minute)")
 	}
 	return answer(75*time.Second, nil)
 }

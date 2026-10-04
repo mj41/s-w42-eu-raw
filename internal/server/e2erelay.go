@@ -11,8 +11,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/mj41/stackchan-server/e2e"
-	"github.com/mj41/stackchan-server/wire"
+	"github.com/mj41/s-w42-eu-raw/e2e"
+	"github.com/mj41/s-w42-eu-raw/wire"
 )
 
 // Frame kinds a browser may send to its robot through the relay.

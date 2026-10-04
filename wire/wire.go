@@ -1,5 +1,5 @@
 // Package wire defines the robot <-> server WebSocket frames. It is public so other
-// servers the robot can switch to (e.g. stackchan-pet) speak the same protocol.
+// servers the robot can switch to (e.g. s-w42-eu-pet) speak the same protocol.
 //
 // It implements the device wire protocol v1 specified in the home-w42-eu repo
 // (docs/wire-protocol.md), which is the reference: change the spec there first.

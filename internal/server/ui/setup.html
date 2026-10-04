@@ -147,8 +147,8 @@
     <p id="copybox" hidden><button class="soft small" id="copysetup">Copy setup for another computer</button>
       <span class="muted" id="copied"></span><br><span class="muted">The server's address, its robot token and
       this computer's Wi-Fi, to paste into the setup page on another computer. Keep it private.</span></p>
-    <p class="muted">Developers: the same over USB from a terminal with <code>stackchan-usb</code>
-    (<a href="https://github.com/mj41/stackchan-server#set-a-robot-up-over-usb">readme</a>). Your own
+    <p class="muted">Developers: the same over USB from a terminal with <code>s-w42-eu-usb</code>
+    (<a href="https://github.com/mj41/s-w42-eu-raw#set-a-robot-up-over-usb">readme</a>). Your own
     firmware build: flash it from a terminal
     (<a href="https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/SETUP.md#c-build-the-firmware-yourself">SETUP.md</a>),
     then set it up here with "Keep the robot's firmware".</p>
@@ -156,7 +156,7 @@
 
   <footer class="foot">
     Open source, a proof of concept:
-    <a href="https://github.com/mj41/stackchan-server">stackchan-server</a> (this page) ·
+    <a href="https://github.com/mj41/s-w42-eu-raw">s-w42-eu-raw</a> (this page) ·
     the robot's <a href="https://github.com/mj41/StackChan/tree/embody-mj41">Embody Mode firmware</a> ·
     flashing by <a href="https://github.com/espressif/esptool-js">esptool-js</a> ·
     <a href="https://github.com/sponsors/mj41">sponsor mj41</a>
@@ -708,7 +708,7 @@ $("start").onclick = async () => {
     const now = $("steps").querySelector("li.now");
     if (now) now.className = "fail"; // the step that failed, in red, not left looking busy
     $("error").textContent = /Failed to open serial port/.test(e.message || "")
-      ? "The robot's USB port is busy: another tab or program uses it (another setup page, idf.py monitor, stackchan-usb). Close it and press the button again."
+      ? "The robot's USB port is busy: another tab or program uses it (another setup page, idf.py monitor, s-w42-eu-usb). Close it and press the button again."
       : e.message || String(e);
     log(`error: ${e.message || e}\n`);
     $("logbox").hidden = false;

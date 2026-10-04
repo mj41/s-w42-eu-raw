@@ -14,8 +14,8 @@ import (
 	"os"
 	"sync"
 
-	"github.com/mj41/stackchan-server/e2e"
-	"github.com/mj41/stackchan-server/wire"
+	"github.com/mj41/s-w42-eu-raw/e2e"
+	"github.com/mj41/s-w42-eu-raw/wire"
 )
 
 // relaySwitches are the plaintext commands an encrypted robot still takes from the relay:

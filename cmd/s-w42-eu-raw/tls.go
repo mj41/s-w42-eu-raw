@@ -39,7 +39,7 @@ func loadOrCreateCert(certFile, keyFile string, log *slog.Logger) (tls.Certifica
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "stackchan-server (self-signed)"},
+		Subject:               pkix.Name{CommonName: "s-w42-eu-raw (self-signed)"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().AddDate(2, 0, 0),
 		KeyUsage:              x509.KeyUsageDigitalSignature,

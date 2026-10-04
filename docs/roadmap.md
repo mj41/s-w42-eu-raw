@@ -4,7 +4,7 @@
 
 ## Where it stands
 
-`stackchan-server` works and is used: one robot, every day, on a home network, with
+`s-w42-eu-raw` works and is used: one robot, every day, on a home network, with
 phones and laptops pairing by QR; the public instance at `chan.w42.eu` runs the same code. It is a **prototype** in these ways:
 
 | Area | Today | Why it matters |
@@ -42,7 +42,7 @@ works, CI is green, and the fuzzers have run without findings.
 ### 2. Each robot its own identity
 
 **First step, done:** per-robot tokens, for robots added by signed-in accounts and for
-invited robots (`-robot-tokens-file`, `stackchan-server invite`): each bound to its robot id
+invited robots (`-robot-tokens-file`, `s-w42-eu-raw invite`): each bound to its robot id
 and revocable on its own; the server keeps only the tokens' hashes. They are still bearer
 tokens on the robot, so the steps below remain.
 

@@ -25,7 +25,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/mj41/stackchan-server/wire"
+	"github.com/mj41/s-w42-eu-raw/wire"
 )
 
 // Same command set as the firmware (see wire.RobotCommandBody).
@@ -49,7 +49,7 @@ func main() {
 
 	b, err := os.ReadFile(*tokenFile)
 	if err != nil {
-		log.Error("read token (start stackchan-server once to generate it)", "err", err)
+		log.Error("read token (start s-w42-eu-raw once to generate it)", "err", err)
 		os.Exit(1)
 	}
 	token := strings.TrimSpace(string(b))
@@ -263,7 +263,7 @@ func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) e
 				ev.Data = map[string]any{"x": rand.IntN(320), "y": rand.IntN(240)}
 			case ev.Name == "nfc_tag" && r.nfcOn:
 				ev.Data = map[string]any{"uid": "04:A2:3B:1C:5D:80:00", "type": "type2", "atqa": 68, "sak": 0,
-					"text": "https://github.com/mj41/stackchan-server"}
+					"text": "https://github.com/mj41/s-w42-eu-raw"}
 			case ev.Name == "nfc_tag":
 				ev.Name = "shake"
 			case ev.Name == "ir_received":

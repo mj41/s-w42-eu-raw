@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mj41/stackchan-server/wire"
+	"github.com/mj41/s-w42-eu-raw/wire"
 )
 
 //go:embed ui/index.html ui/robots.html ui/setup.html ui/e2e.js ui/emoji ui/vendor

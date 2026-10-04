@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mj41/stackchan-server/wire"
+	"github.com/mj41/s-w42-eu-raw/wire"
 )
 
 // fakeIssuer is a minimal OpenID Connect provider: discovery, keys, and a token endpoint

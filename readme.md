@@ -1,4 +1,4 @@
-# stackchan-server
+# s-w42-eu-raw
 
 Relay between M5Stack Stackchan robots and web browsers for **Embody Mode**. It lets you see through the robot and control it from any browser, with no app to install.
 
@@ -18,7 +18,7 @@ Part of [home-w42-eu](https://github.com/mj41/home-w42-eu), a local first, priva
 > change when something better comes along, without migrations: update the robot's firmware
 > and the servers together.
 >
-> **Want more?** Ask in the [issues](https://github.com/mj41/stackchan-server/issues), and ideally [sponsor mj41](https://github.com/sponsors/mj41) on GitHub:
+> **Want more?** Ask in the [issues](https://github.com/mj41/s-w42-eu-raw/issues), and ideally [sponsor mj41](https://github.com/sponsors/mj41) on GitHub:
 > mj41 codes for attention food.
 
 ## Dashboard
@@ -59,7 +59,7 @@ Controls appear only for the commands a robot lists in its capabilities.
 ## Run
 
 ```bash
-go run ./cmd/stackchan-server              # listens on :8765
+go run ./cmd/s-w42-eu-raw              # listens on :8765
 go run ./cmd/fake-robot                    # simulated robot, in a second terminal
 ```
 
@@ -88,7 +88,7 @@ account; the page also lists your robots (online or not), gives a new token (the
 stops working at once) and removes them.
 
 ```bash
-stackchan-server -public-url https://chan.example \
+s-w42-eu-raw -public-url https://chan.example \
   -oidc-issuer https://auth.example -oidc-client-id chan -oidc-client-secret-file /secrets/oidc \
   -admin-emails you@example.com -robots-per-account 3 -state-file /state/state.json \
   -tiers-file /config/tiers -sponsor-url https://github.com/sponsors/you
@@ -144,7 +144,7 @@ has no token. For other people's robots, without sign-in, give each robot its ow
 token**:
 
 ```bash
-stackchan-server invite stackchan-0a1b2c3d4e50   # the robot id its screen shows (stackchan-<MAC>)
+s-w42-eu-raw invite stackchan-0a1b2c3d4e50   # the robot id its screen shows (stackchan-<MAC>)
 ```
 
 It prints a new token and a line. **The token** goes to the robot's owner, for their
@@ -210,7 +210,7 @@ SHA-256. On a server with sign-in, only signed-in people get it. The release has
 no token inside: those are the robot's settings, written over USB. Until it is set up, the
 robot's Embody Mode shows "Set up: chan.w42.eu/setup".
 
-**From a terminal: `stackchan-usb`**, the same over USB for developers and scripts (the robot
+**From a terminal: `s-w42-eu-usb`**, the same over USB for developers and scripts (the robot
 must already have firmware with USB setup):
 
 ```bash
@@ -238,7 +238,7 @@ go run ./cmd/stackchan-usb launch -app "Embody Mode"
 
 A public instance runs at **https://chan.w42.eu**. To run your own:
 
-1. **Image:** pushing a `v*` tag builds `ghcr.io/mj41/stackchan-server:<tag>`
+1. **Image:** pushing a `v*` tag builds `ghcr.io/mj41/s-w42-eu-raw:<tag>`
    (`.github/workflows/release.yml`). Pin it by digest where you deploy it.
 2. **Robot token:** mount the robot token file at `/secrets/robot-token` (keep it out of
    git), and pass `-public-url https://<your host>`.
@@ -326,7 +326,7 @@ command table below.
 | `sprite_hide`, `sprite_clear` | `{"id"}` / none: remove one sprite / all |
 | `picture` | `{"asset": "pet/dream.jpg"}`: a stored picture instead of the face (`face` ends it) |
 | `play` | `{"asset": "snd/hello.wav", "volume": 0..100}`: a stored WAV (16-bit PCM, mono or stereo, 4-48 kHz), streamed from the file so any length works; `sound_done` {asset} at the end, `sound_error` {asset, reason}; `play_stop` ends it |
-| `touch_stream`, `imu_stream`, `light_stream` | `{"on": bool}`: sent by the server while a browser has `?touch=1` / `?imu=1` / `?light=1` open (an app server such as [stackchan-pet](https://github.com/mj41/stackchan-pet) may send `light_stream` itself) |
+| `touch_stream`, `imu_stream`, `light_stream` | `{"on": bool}`: sent by the server while a browser has `?touch=1` / `?imu=1` / `?light=1` open (an app server such as [s-w42-eu-pet](https://github.com/mj41/s-w42-eu-pet) may send `light_stream` itself) |
 | `server_add` | `{"url": "ws://…" or "wss://…", "name", "token"}`: add (or update) an entry in the robot's server list, stored on the robot |
 | `server_remove`, `server_default`, `server_switch` | `{"server": url or name}`: remove an entry (not the built-in or current one), make it the one used at start (`""` = no default: the robot starts as a chooser), or switch to it now (the robot leaves this server). A new default or a switch is asked on the robot's screen first (`server_asking`; without a Yes `server_refused`) |
 | `proximity` | `{"on": bool}`: the proximity sensor, whose IR LED next to the camera pulses ~10×/s. Off stops the LED and the approach events; light and auto-brightness keep working. Telemetry `proximity_on` |
@@ -335,7 +335,7 @@ command table below.
 | `automation` | `{"autostart": bool}`: open Embody Mode after every power-on or restart (stored on the robot, off until set); the robot answers with an `automation {autostart}` event, also sent after it registers. Only with firmware built with `CONFIG_STACKCHAN_EMBODY_AUTOMATION` (off by default), like the next two |
 | `restart` | none: restart the robot, back into Embody Mode |
 | `launch` | `{"app": "AVATAR\|AI.AGENT\|DANCE\|SETUP\|…"}`: restart into another launcher app once (`""` = the launcher); `launch_unknown {app}` event for a name it does not have |
-| `car_enable` | `{"on": bool, "board"?: "v1\|v2\|both"}`: the optional TPBot car (micro:bit with [tpbot-ble](https://github.com/mj41/tpbot-ble)) over BLE (firmware `CONFIG_STACKCHAN_EMBODY_CAR`). Off by default and kept on the robot. While on, the robot registers again with the `car_*` commands and telemetry listed in sbot's readme, [Car capability](https://github.com/mj41/sbot#car-capability), plus `car_connected`, and sends `car_connected` / `car_disconnected` events. This dashboard has no car controls; sbot has |
+| `car_enable` | `{"on": bool, "board"?: "v1\|v2\|both"}`: the optional TPBot car (micro:bit with [tpbot-ble](https://github.com/mj41/tpbot-ble)) over BLE (firmware `CONFIG_STACKCHAN_EMBODY_CAR`). Off by default and kept on the robot. While on, the robot registers again with the `car_*` commands and telemetry listed in sbot's readme, [Car capability](https://github.com/mj41/s-w42-eu-sbot#car-capability), plus `car_connected`, and sends `car_connected` / `car_disconnected` events. This dashboard has no car controls; sbot has |
 
 ### Binary messages
 
@@ -402,13 +402,15 @@ the [roadmap](docs/roadmap.md).
 ## Related projects
 
 - [StackChan fork, branch `embody-mj41`](https://github.com/mj41/StackChan/tree/embody-mj41): the robot's firmware, Embody Mode.
-- Other app servers the robot can switch to, on the same `wire` package: [stackchan-pet](https://github.com/mj41/stackchan-pet) (a Tamagotchi for kids) and [sbot](https://github.com/mj41/sbot) (a cockpit for the robot and a TPBot car, growing into the home node).
+- Other app servers the robot can switch to, on the same `wire` package: [s-w42-eu-pet](https://github.com/mj41/s-w42-eu-pet) (a Tamagotchi for kids) and [s-w42-eu-sbot](https://github.com/mj41/s-w42-eu-sbot) (a cockpit for the robot and a TPBot car, growing into the home node).
 - [home-w42-eu](https://github.com/mj41/home-w42-eu): the platform, its use cases, architecture and the wire protocol's reference. All the repos: [The repos today](https://github.com/mj41/home-w42-eu#the-repos-today).
-- [stackchan-mj](https://github.com/mj41/stackchan-mj): working notes, scripts to run this server in the background on a LAN, the robot's hardware coverage and the trust design behind the [roadmap](docs/roadmap.md).
+- The robot's [hardware coverage](https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/HARDWARE.md) and the [trust design](https://github.com/mj41/home-w42-eu/blob/main/docs/implementations/stackchan-trust.md) behind the [roadmap](docs/roadmap.md).
 
 ## Credits
 
 The dashboard's emoji are [Fluent Emoji](https://github.com/microsoft/fluentui-emoji) (Flat style) by Microsoft, MIT license; see [internal/server/ui/emoji/LICENSE](internal/server/ui/emoji/LICENSE).
+
+Stack-chan (スタックチャン) is a registered trademark of Shinya Ishikawa; this project is independent and only made to work with [Stack-chan](https://github.com/stack-chan/stack-chan) robots.
 
 ## License
 
