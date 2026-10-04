@@ -963,7 +963,8 @@ function makeCard(r) {
     const watch = el("button", { className: "soft", textContent: "Watch" });
     // The stream's size; 640x480 is about four times the data (one size for all watchers).
     const vsize = el("select", { className: "select", ariaLabel: "Video size" },
-      [["320x240", "320×240"], ["640x480", "640×480"]].map(([v, t]) => el("option", { value: v, textContent: t })));
+      [["320x240", "320×240"], ["640x480", "640×480"]].map(([v, t]) => el("option", { value: v, textContent: t, className: v === "640x480" ? "full-video" : "" })));
+    if (document.body.dataset.noFullVideo) vsize.options[1].disabled = true; // a robot shown after /api/me answered
     const listen = el("button", { className: "soft", textContent: "Listen" });
 
     // Audio message: uint16 LE sample rate, then s16le mono PCM.
@@ -1565,6 +1566,17 @@ connect();
 // Account in the top bar (sign-in exists only when the server has it configured).
 fetch("/api/me", { credentials: "same-origin" }).then((r) => r.json()).then((me) => {
   const acct = document.getElementById("acct");
+  // Tiers (with sign-in only) set the limits; 640x480 video from tier 3 up.
+  if (!me.full_video) {
+    for (const o of document.querySelectorAll("option.full-video")) { o.disabled = true; o.textContent += " (" + (me.tier_hint || "not in your tier") + ")"; }
+    document.body.dataset.noFullVideo = "1";
+  }
+  if (me.sign_in && me.tier) {
+    const t = document.createElement("span");
+    t.textContent = "tier " + me.tier + " · ";
+    t.title = me.tier_hint || "";
+    acct.append(t);
+  }
   if (me.signed_in) {
     acct.append(me.name + " · ");
     const out = document.createElement("a");

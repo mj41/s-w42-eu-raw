@@ -30,7 +30,7 @@ func (s *Server) handleE2EToRobot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.commandAllowed(session, time.Now()) {
-		http.Error(w, "too many requests, slow down", http.StatusTooManyRequests)
+		s.tooMany(w, session, "too many requests")
 		return
 	}
 	var req struct {

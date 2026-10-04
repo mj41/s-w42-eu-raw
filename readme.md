@@ -90,7 +90,8 @@ stops working at once) and removes them.
 ```bash
 stackchan-server -public-url https://chan.example \
   -oidc-issuer https://auth.example -oidc-client-id chan -oidc-client-secret-file /secrets/oidc \
-  -admin-emails you@example.com -robots-per-account 3 -state-file /state/state.json
+  -admin-emails you@example.com -robots-per-account 3 -state-file /state/state.json \
+  -tiers-file /config/tiers -sponsor-url https://github.com/sponsors/you
 ```
 
 - **Private or public.** With sign-in configured, every robot is private by default: only its
@@ -101,8 +102,32 @@ stackchan-server -public-url https://chan.example \
   pairs anyone, as on a server without sign-in. Making it private again unpairs everybody
   else. Anonymous browsers cannot send "Ask a paired phone" requests, so they bother nobody.
 - Without sign-in configured (a LAN server), every robot is public, as before.
-- An account may add `-robots-per-account` robots (default 3); `-admin-emails` (verified
-  e-mails) have no limit and may remove any added robot.
+- **Tiers** set the limits (not access: pairing still needs the robot's code, or a public
+  robot):
+
+  | Tier | Who | Commands/s (burst) | Media sockets per robot | 640×480 video | Robots to add |
+  |---|---|---|---|---|---|
+  | 1 | `-admin-emails`, tier 1 in `-tiers-file` | 20 (60) | 4 | yes | 20 (admins: no limit) |
+  | 2 | sponsors (tier 2 in the file) | 20 (60) | 4 | yes | 10 |
+  | 3 | others the owner approved (tier 3) | 20 (60) | 4 | yes | 5 |
+  | 4 | signed in | 10 (30) | 2 | no (320×240) | `-robots-per-account` (3) |
+  | 5 | anonymous | 3 (15) | 1 | no | — |
+
+  Over a limit, the answer (429) says how to get more: tier 5 "Sign in for higher limits.",
+  tier 4 "Sponsors get higher limits: `-sponsor-url`". The dashboard shows the tier next to
+  the account. `-tiers-file` is plain text for a config repository, re-read when it changes
+  (a broken file keeps the rules from before):
+
+  ```
+  # tier  who                      (anything after it is a note)
+  1       github:mj41
+  2       github:octocat           sponsor since 2026-10
+  3       email:friend@example.com
+  ```
+
+  `email:` is a provider-verified e-mail; `github:` (login) and `github-id:` (user id) match
+  only through Dex's GitHub connector (scope `federated:id`). Without sign-in (a LAN server)
+  everybody is tier 1.
 - Ids of robots that connected with the shared token belong to the owner and cannot be
   added; a robot added by one account cannot be added by another.
 - The login uses the authorization code flow with PKCE, a nonce and a one-time state bound

@@ -264,7 +264,7 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 	session := s.session(w, r)
 	id := r.PathValue("id")
 	if !s.commandAllowed(session, time.Now()) {
-		http.Error(w, "too many commands, slow down", http.StatusTooManyRequests)
+		s.tooMany(w, session, "too many commands")
 		return
 	}
 

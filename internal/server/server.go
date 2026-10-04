@@ -41,7 +41,9 @@ type Config struct {
 	OIDCClientSecret string
 	OIDCRedirectURL  string   // default PublicURL + /auth/callback
 	AdminEmails      []string // verified e-mails without the per-account robot limit, who may remove any added robot
-	RobotsPerAccount int      // default 3
+	RobotsPerAccount int      // tier 4's robots per account, default 3
+	TiersFile        string   // tiers 1-3 by e-mail or GitHub login (tiers.go); empty: only admins are tier 1
+	SponsorURL       string   // where tier 4 is pointed when a limit is hit
 
 	FirmwareDir      string               // the official firmware (manifest.json and its parts) for /setup, from disk; wins over FirmwareRelease
 	FirmwareRelease  string               // else fetched from its GitHub release: "latest" or a tag (embody-v…); "" = no firmware
@@ -76,6 +78,7 @@ type Server struct {
 
 	robotFails *failLimiter   // failed robot logins per address
 	streams    *streamLimiter // open browser streams per session and address
+	tiers      *tierRules     // nil without a tiers file
 	cmdMu      sync.Mutex
 	cmdBuckets map[string]*bucket         // command budget per browser session
 	pairFails  *failLimiter               // wrong pairing codes per address
@@ -173,6 +176,7 @@ func New(cfg Config) *Server {
 		oidc:         newOIDCLogin(cfg),
 		streams:      newStreamLimiter(),
 		cmdBuckets:   map[string]*bucket{},
+		tiers:        newTierRules(cfg.TiersFile),
 		logins:       map[string]Account{},
 		owned:        map[string]ownedInvite{},
 		ownerRobots:  map[string]bool{},

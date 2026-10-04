@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -154,13 +155,11 @@ func (s *Server) clientIP(r *http.Request) string {
 // command budget per session, so one page (or a script) cannot tie up the server or flood a
 // robot.
 const (
-	maxSSEPerSession   = 8
-	maxSSEPerAddr      = 30
-	maxMediaPerSession = 4 // per robot
-	maxMediaPerAddr    = 20
-	commandsPerSec     = 20
-	commandBurst       = 60
-	maxCommandBuckets  = 10000
+	maxSSEPerSession  = 8
+	maxSSEPerAddr     = 30
+	maxMediaPerAddr   = 20
+	maxCommandBuckets = 10000
+	// Per session, by tier (tiers.go): commands per second and burst, media sockets per robot.
 )
 
 // streamLimiter counts open streams per key.
@@ -206,11 +205,13 @@ func (s *Server) streamKeys(kind, session, ip string, perSession, perAddr int) m
 	return keys
 }
 
-// commandAllowed spends one command from the session's budget.
+// commandAllowed spends one command from the session's budget (its tier's rate).
 func (s *Server) commandAllowed(session string, now time.Time) bool {
+	tl := tierTable[s.sessionTier(session, now)]
+	key := fmt.Sprintf("%s|%v", session, tl.CommandsPerSec) // a new budget after signing in
 	s.cmdMu.Lock()
 	defer s.cmdMu.Unlock()
-	b := s.cmdBuckets[session]
+	b := s.cmdBuckets[key]
 	if b == nil {
 		if len(s.cmdBuckets) >= maxCommandBuckets {
 			for k, v := range s.cmdBuckets {
@@ -222,8 +223,8 @@ func (s *Server) commandAllowed(session string, now time.Time) bool {
 				s.cmdBuckets = map[string]*bucket{}
 			}
 		}
-		b = newBucket(commandsPerSec, commandBurst, now)
-		s.cmdBuckets[session] = b
+		b = newBucket(tl.CommandsPerSec, tl.CommandBurst, now)
+		s.cmdBuckets[key] = b
 	}
 	return b.take(1, now)
 }

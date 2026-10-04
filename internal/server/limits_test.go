@@ -205,6 +205,7 @@ func TestCommandBudget(t *testing.T) {
 	robot := connectRobot(t, ts, "chan-1", wire.ClassRobot)
 	browser := pairBrowser(t, robot)
 	limited := 0
+	commandBurst := int(tierTable[1].CommandBurst) // no sign-in: a home server, tier 1
 	for i := 0; i < commandBurst+20; i++ {
 		if postCommand(t, browser, ts, "chan-1", "nod") == http.StatusTooManyRequests {
 			limited++

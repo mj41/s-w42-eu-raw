@@ -40,6 +40,11 @@ type Account struct {
 	Key   string `json:"key"`
 	Name  string `json:"name"`
 	Email string `json:"email,omitempty"`
+	// From Dex's federated_claims: the upstream provider (connector id, e.g. "github") and its
+	// user id, and the login there (preferred_username); for tiers (tiers.go).
+	Provider   string `json:"provider,omitempty"`
+	ProviderID string `json:"provider_id,omitempty"`
+	Login      string `json:"login,omitempty"`
 }
 
 // ownedInvite is a robot an account added: the SHA-256 of its token, never the token.
@@ -90,7 +95,7 @@ func (o *oidcLogin) setup(ctx context.Context) (*oauth2.Config, *oidc.IDTokenVer
 		return nil, nil, fmt.Errorf("sign-in provider %s: %w", o.issuer, err)
 	}
 	o.conf = &oauth2.Config{ClientID: o.clientID, ClientSecret: o.clientSecret, RedirectURL: o.redirectURL,
-		Endpoint: p.Endpoint(), Scopes: []string{oidc.ScopeOpenID, "email", "profile"}}
+		Endpoint: p.Endpoint(), Scopes: []string{oidc.ScopeOpenID, "email", "profile", "federated:id"}}
 	o.verifier = p.Verifier(&oidc.Config{ClientID: o.clientID})
 	return o.conf, o.verifier, nil
 }
@@ -149,7 +154,12 @@ func (s *Server) isAdmin(a Account) bool {
 	return a.Email != "" && slices.ContainsFunc(s.cfg.AdminEmails, func(e string) bool { return strings.EqualFold(e, a.Email) })
 }
 
-func (s *Server) robotsPerAccount() int {
+// robotsPerAccount is how many robots an account may add: by its tier, tier 4 by
+// -robots-per-account.
+func (s *Server) robotsPerAccount(a Account) int {
+	if n := tierTable[s.accountTier(a, time.Now())].Robots; n > 0 {
+		return n
+	}
 	if s.cfg.RobotsPerAccount > 0 {
 		return s.cfg.RobotsPerAccount
 	}
@@ -245,11 +255,18 @@ func (s *Server) exchange(ctx context.Context, code string, p pendingLogin) (Acc
 		EmailVerified     bool   `json:"email_verified"`
 		Name              string `json:"name"`
 		PreferredUsername string `json:"preferred_username"`
+		Federated         struct {
+			ConnectorID string `json:"connector_id"`
+			UserID      string `json:"user_id"`
+		} `json:"federated_claims"`
 	}
 	if err := idt.Claims(&c); err != nil {
 		return Account{}, err
 	}
-	a := Account{Key: idt.Issuer + "|" + idt.Subject}
+	a := Account{Key: idt.Issuer + "|" + idt.Subject, Provider: c.Federated.ConnectorID, ProviderID: c.Federated.UserID}
+	if a.Provider != "" {
+		a.Login = c.PreferredUsername // the login at that provider (Dex's GitHub connector: the GitHub login)
+	}
 	if c.EmailVerified {
 		a.Email = c.Email
 	}
@@ -348,10 +365,13 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	session := s.session(w, r)
 	a, ok := s.account(session)
 	if !ok {
+		t := s.sessionTier(session, time.Now())
 		writeJSON(w, http.StatusOK, map[string]any{"signed_in": false, "sign_in": s.oidc != nil,
+			"tier": t, "tier_hint": s.tierHint(t), "full_video": tierTable[t].FullVideo,
 			"local_setup": s.localSetup(r), "robot_url": s.robotURL(), "robot_reachable": s.robotURLReachable()})
 		return
 	}
+	tier := s.accountTier(a, time.Now())
 	s.mu.Lock()
 	s.pairOwnedLocked(session, a) // robots added or connected since sign-in
 	online := func(id string) bool { st := s.robots[id]; return st != nil && st.conn != nil }
@@ -373,7 +393,8 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	slices.SortFunc(robots, func(x, y myRobot) int { return strings.Compare(x.ID, y.ID) })
 	writeJSON(w, http.StatusOK, map[string]any{
 		"signed_in": true, "sign_in": true, "name": a.Name, "email": a.Email,
-		"admin": s.isAdmin(a), "limit": s.robotsPerAccount(), "robots": robots,
+		"admin": s.isAdmin(a), "limit": s.robotsPerAccount(a), "robots": robots,
+		"tier": tier, "tier_hint": s.tierHint(tier), "full_video": tierTable[tier].FullVideo,
 		"robot_url": s.robotURL(), "robot_reachable": s.robotURLReachable(),
 	})
 }
@@ -427,9 +448,9 @@ func (s *Server) handleAddMyRobot(w http.ResponseWriter, r *http.Request) {
 				n++
 			}
 		}
-		if n >= s.robotsPerAccount() {
+		if n >= s.robotsPerAccount(a) {
 			s.mu.Unlock()
-			http.Error(w, fmt.Sprintf("you can add up to %d robots", s.robotsPerAccount()), http.StatusForbidden)
+			http.Error(w, fmt.Sprintf("you can add up to %d robots", s.robotsPerAccount(a)), http.StatusForbidden)
 			return
 		}
 	}

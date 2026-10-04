@@ -161,9 +161,11 @@ func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "robot not paired with this browser", http.StatusForbidden)
 		return
 	}
-	keys := s.streamKeys("media", session+" "+id, s.clientIP(r), maxMediaPerSession, maxMediaPerAddr)
+	tl := tierTable[s.sessionTier(session, time.Now())]
+	sub.full = sub.full && tl.FullVideo // 640x480 from tier 3 up; others get 320x240
+	keys := s.streamKeys("media", session+" "+id, s.clientIP(r), tl.MediaPerRobot, maxMediaPerAddr)
 	if !s.streams.acquire(keys) {
-		http.Error(w, "too many open media streams", http.StatusTooManyRequests)
+		s.tooMany(w, session, "too many open media streams")
 		return
 	}
 	defer s.streams.release(keys)
@@ -241,7 +243,7 @@ func (s *Server) handlePicture(w http.ResponseWriter, r *http.Request) {
 	session := s.session(w, r)
 	id := r.PathValue("id")
 	if !s.commandAllowed(session, time.Now()) {
-		http.Error(w, "too many requests, slow down", http.StatusTooManyRequests)
+		s.tooMany(w, session, "too many requests")
 		return
 	}
 	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "image/jpeg" {
