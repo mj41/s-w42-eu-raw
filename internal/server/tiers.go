@@ -2,8 +2,8 @@ package server
 
 // Tiers: how much a browser may use a server on the internet (chan.w42.eu). Access to a robot
 // does not depend on the tier (browsers pair by the code on the robot's screen, or a robot is
-// public); the tier sets the rate limits, the video size and how many robots an account may
-// add. When a limit is hit, the answer says how to get more: anonymous people are asked to
+// public); the tier sets the rate limits and the video size.
+// When a limit is hit, the answer says how to get more: anonymous people are asked to
 // sign in, signed-in people to become sponsors.
 //
 //	1  the server's admins (-admin-emails) and people listed as tier 1 in the tiers file
@@ -40,13 +40,12 @@ type tierLimits struct {
 	CommandsPerSec, CommandBurst float64 // commands, pictures, uploads per browser session
 	MediaPerRobot                int     // open media sockets per session and robot
 	FullVideo                    bool    // may ask for 640x480 video
-	Robots                       int     // robots an account may add (0: none; tier 4 uses -robots-per-account)
 }
 
 var tierTable = map[int]tierLimits{
-	1: {CommandsPerSec: 20, CommandBurst: 60, MediaPerRobot: 4, FullVideo: true, Robots: 20},
-	2: {CommandsPerSec: 20, CommandBurst: 60, MediaPerRobot: 4, FullVideo: true, Robots: 10},
-	3: {CommandsPerSec: 20, CommandBurst: 60, MediaPerRobot: 4, FullVideo: true, Robots: 5},
+	1: {CommandsPerSec: 20, CommandBurst: 60, MediaPerRobot: 4, FullVideo: true},
+	2: {CommandsPerSec: 20, CommandBurst: 60, MediaPerRobot: 4, FullVideo: true},
+	3: {CommandsPerSec: 20, CommandBurst: 60, MediaPerRobot: 4, FullVideo: true},
 	4: {CommandsPerSec: 10, CommandBurst: 30, MediaPerRobot: 2, FullVideo: false},
 	5: {CommandsPerSec: 3, CommandBurst: 15, MediaPerRobot: 1, FullVideo: false},
 }

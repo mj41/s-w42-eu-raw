@@ -70,10 +70,6 @@ func TestAccountTier(t *testing.T) {
 			t.Errorf("%+v: tier %d, want %d", c.a, got, c.want)
 		}
 	}
-	if s.robotsPerAccount(Account{Provider: "github", Login: "octocat"}) != tierTable[2].Robots ||
-		s.robotsPerAccount(Account{Email: "someone@example.com"}) != defaultRobotsPerAccount {
-		t.Error("robots per account do not follow the tier")
-	}
 
 	// Signed in or not.
 	s.logins["signed-in"] = Account{Email: "someone@example.com"}

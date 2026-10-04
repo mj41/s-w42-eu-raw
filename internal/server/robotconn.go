@@ -89,7 +89,7 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "too many failed logins for this robot from this address, try again later", http.StatusTooManyRequests)
 		return
 	}
-	ok, guest := s.robotAuth(id, token)
+	ok, guest := s.robotAuth(r.Context(), id, token)
 	if !ok {
 		s.robotFails.fail(failKey, now)
 		s.log.Info("robot unauthorized", "robot", id, "remote", ip)

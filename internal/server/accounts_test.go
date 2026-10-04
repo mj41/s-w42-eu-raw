@@ -14,7 +14,6 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -148,133 +147,95 @@ func (u *user) do(method, path, body string, sameOrigin bool) (int, string) {
 	return resp.StatusCode, string(b)
 }
 
-func (u *user) addRobot(id string) (int, string) {
-	code, body := u.do("POST", "/api/my/robots", `{"robot_id":"`+id+`"}`, true)
-	var r struct{ Token string }
-	json.Unmarshal([]byte(body), &r)
-	return code, r.Token
+// fakeManager answers robot-auth like a Stackchan manager, from a table the test controls.
+type fakeManager struct {
+	ts     *httptest.Server
+	mu     sync.Mutex
+	robots map[string]fakeManaged // robot id -> its token for this app and owner
+	asked  int
+}
+
+type fakeManaged struct {
+	token, owner string
+	public       bool
+}
+
+const managerSecret = "app-secret"
+
+func newFakeManager(t *testing.T) *fakeManager {
+	m := &fakeManager{robots: map[string]fakeManaged{}}
+	m.ts = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/robot-auth" || r.Header.Get("Authorization") != "Bearer "+managerSecret {
+			http.Error(w, "unknown app", http.StatusUnauthorized)
+			return
+		}
+		var req struct{ Robot, Token string }
+		json.NewDecoder(r.Body).Decode(&req)
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		m.asked++
+		rb, ok := m.robots[req.Robot]
+		if !ok || rb.token != req.Token {
+			json.NewEncoder(w).Encode(map[string]any{"ok": false})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "owner": rb.owner, "owner_name": "x", "public": rb.public})
+	}))
+	t.Cleanup(m.ts.Close)
+	return m
+}
+
+// set gives a robot a token for this app, owned by owner (an account key: issuer|subject).
+func (m *fakeManager) set(id, token, owner string, public bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.robots[id] = fakeManaged{token, owner, public}
 }
 
 func newSignInServer(t *testing.T, f *fakeIssuer, stateFile string) (*httptest.Server, *Server) {
+	ts, s, _ := newManagedServer(t, f, stateFile)
+	return ts, s
+}
+
+// newManagedServer is a server with sign-in and a (fake) manager.
+func newManagedServer(t *testing.T, f *fakeIssuer, stateFile string) (*httptest.Server, *Server, *fakeManager) {
 	t.Helper()
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	m := newFakeManager(t)
 	s := New(Config{RobotToken: testToken, PairTTL: time.Minute, Log: quiet, StateFile: stateFile,
+		ManagerURL: m.ts.URL, ManagerSecret: managerSecret,
 		OIDCIssuer: f.ts.URL, OIDCClientID: "chan", OIDCClientSecret: "secret",
 		OIDCRedirectURL: "http://chan.example/auth/callback", AdminEmails: []string{"boss@example.com"},
 		Offers: []wire.OfferedServer{{Name: "cloud", URL: "wss://chan.example", Token: "t0k"}}})
 	ts := httptest.NewServer(s.Handler())
 	s.cfg.PublicURL = "https://chan.example"
 	t.Cleanup(ts.Close)
-	return ts, s
+	return ts, s, m
 }
 
-func TestSignInAndAddRobot(t *testing.T) {
+// A robot set up by the manager connects with its token for this app; the manager says whose
+// it is. Wrong tokens and unknown robots are refused; a confirmed robot keeps working for a
+// while when the manager is down; a refusal is never cached.
+func TestManagedRobot(t *testing.T) {
 	f := newFakeIssuer(t)
-	ts, _ := newSignInServer(t, f, "")
+	ts, _, m := newManagedServer(t, f, "")
+	const id = "stackchan-0a1b2c3d4e50"
+	if got := dialStatus(ts, "tok-1", id); got != http.StatusUnauthorized {
+		t.Fatalf("unknown to the manager: %d", got)
+	}
+	m.set(id, "tok-1", f.ts.URL+"|ema", false)
+	registerGuest(t, ts, "tok-1", id) // refused a moment ago, works now: refusals are not cached
+	if got := dialStatus(ts, "tok-2", id); got != http.StatusUnauthorized {
+		t.Fatalf("a wrong token: %d", got)
+	}
 	ema := newUser(t, ts.URL)
-
-	if _, body := ema.do("GET", "/api/me", "", false); !strings.Contains(body, `"signed_in":false`) || !strings.Contains(body, `"sign_in":true`) {
-		t.Fatalf("me before sign-in: %s", body)
-	}
-	if code, _ := ema.addRobot("stackchan-0a1b2c3d4e50"); code != http.StatusUnauthorized {
-		t.Fatalf("add without sign-in: %d", code)
-	}
 	ema.signIn(f, "ema", "ema@example.com", "Ema")
-	if _, body := ema.do("GET", "/api/me", "", false); !strings.Contains(body, `"name":"Ema"`) || !strings.Contains(body, `"limit":3`) {
-		t.Fatalf("me: %s", body)
+	if got := ema.pairedIDs(); got != id {
+		t.Fatalf("the owner (from the manager) has the robot: %q", got)
 	}
-
-	// Add a robot: the token works for that robot, as a guest (no offers), and is shown once.
-	code, token := ema.addRobot("stackchan-0a1b2c3d4e50")
-	if code != http.StatusOK || len(token) != 64 {
-		t.Fatalf("add: %d %q", code, token)
-	}
-	kinds := registerGuest(t, ts, token, "stackchan-0a1b2c3d4e50")
-	if strings.Contains(strings.Join(kinds, " "), wire.KindServerOffer) {
-		t.Fatalf("an added robot got the offers: %v", kinds)
-	}
-	if got := dialStatus(ts, token, "stackchan-0a1b2c3d4e51"); got != http.StatusUnauthorized {
-		t.Fatalf("token for another id: %d", got)
-	}
-	if _, body := ema.do("GET", "/api/me", "", false); strings.Contains(body, token) {
-		t.Fatal("/api/me must never return a token")
-	}
-
-	// CSRF: changing requests need this server's Origin.
-	if code, _ := ema.do("POST", "/api/my/robots", `{"robot_id":"stackchan-0a1b2c3d4e52"}`, false); code != http.StatusForbidden {
-		t.Fatalf("add without Origin: %d", code)
-	}
-
-	// Another account cannot claim it; the owner's robots cannot be claimed at all.
-	jan := newUser(t, ts.URL)
-	jan.signIn(f, "jan", "jan@example.com", "Jan")
-	if code, _ := jan.addRobot("stackchan-0a1b2c3d4e50"); code != http.StatusConflict {
-		t.Fatalf("other account claims: %d", code)
-	}
-	connectRobot(t, ts, "stackchan-owner00001", wire.ClassRobot)
-	time.Sleep(50 * time.Millisecond)
-	if code, _ := jan.addRobot("stackchan-owner00001"); code != http.StatusConflict {
-		t.Fatalf("claim of the owner's robot: %d", code)
-	}
-
-	// A new token replaces the old one.
-	code, token2 := ema.addRobot("stackchan-0a1b2c3d4e50")
-	if code != http.StatusOK || token2 == token {
-		t.Fatalf("new token: %d", code)
-	}
-	if got := dialStatus(ts, token, "stackchan-0a1b2c3d4e50"); got != http.StatusUnauthorized {
-		t.Fatalf("old token after a new one: %d", got)
-	}
-
-	// The limit: 3 per account.
-	for _, id := range []string{"stackchan-000000000002", "stackchan-000000000003"} {
-		if code, _ := ema.addRobot(id); code != http.StatusOK {
-			t.Fatalf("add %s: %d", id, code)
-		}
-	}
-	if code, _ := ema.addRobot("stackchan-000000000004"); code != http.StatusForbidden {
-		t.Fatalf("over the limit: %d", code)
-	}
-
-	// Removing revokes at once; only the owner (or an admin) may.
-	if code, _ := jan.do("DELETE", "/api/my/robots/stackchan-0a1b2c3d4e50", "", true); code != http.StatusNotFound {
-		t.Fatalf("someone else removes: %d", code)
-	}
-	if code, _ := ema.do("DELETE", "/api/my/robots/stackchan-0a1b2c3d4e50", "", true); code != http.StatusNoContent {
-		t.Fatalf("remove: %d", code)
-	}
-	if got := dialStatus(ts, token2, "stackchan-0a1b2c3d4e50"); got != http.StatusUnauthorized {
-		t.Fatalf("token after removal: %d", got)
-	}
-
-	// Sign out.
-	if code, _ := ema.do("POST", "/auth/logout", "", true); code != http.StatusNoContent {
-		t.Fatalf("logout: %d", code)
-	}
-	if _, body := ema.do("GET", "/api/me", "", false); !strings.Contains(body, `"signed_in":false`) {
-		t.Fatalf("after logout: %s", body)
-	}
-}
-
-func TestAdminHasNoLimit(t *testing.T) {
-	f := newFakeIssuer(t)
-	ts, _ := newSignInServer(t, f, "")
-	boss := newUser(t, ts.URL)
-	boss.signIn(f, "boss", "boss@example.com", "Boss")
-	for i := 0; i < 5; i++ {
-		if code, _ := boss.addRobot("stackchan-00000000000" + string(rune('a'+i))); code != http.StatusOK {
-			t.Fatalf("admin add %d: %d", i, code)
-		}
-	}
-	// The admin's own robot (seen with the shared token) can be added to the admin's account:
-	// the setup page does that; then it connects with its own token.
-	connectRobot(t, ts, "stackchan-owner00001", wire.ClassRobot)
-	time.Sleep(50 * time.Millisecond)
-	code, token := boss.addRobot("stackchan-owner00001")
-	if code != http.StatusOK {
-		t.Fatalf("admin adds their own robot: %d", code)
-	}
-	registerGuest(t, ts, token, "stackchan-owner00001")
+	// The manager goes away: the robot it confirmed still connects (cached).
+	m.ts.Close()
+	registerGuest(t, ts, "tok-1", id)
 }
 
 func TestCallbackChecks(t *testing.T) {
@@ -290,33 +251,6 @@ func TestCallbackChecks(t *testing.T) {
 	loc, _ := url.Parse(resp.Header.Get("Location"))
 	if code, _ := u.do("GET", "/auth/callback?code=x&state="+url.QueryEscape(loc.Query().Get("state")), "", false); code != http.StatusBadRequest {
 		t.Fatalf("state of another browser: %d", code)
-	}
-}
-
-func TestOwnedInvitesSurviveRestart(t *testing.T) {
-	f := newFakeIssuer(t)
-	path := filepath.Join(t.TempDir(), "state.json")
-	ts, s := newSignInServer(t, f, path)
-	u := newUser(t, ts.URL)
-	u.signIn(f, "ema", "ema@example.com", "Ema")
-	_, token := u.addRobot("stackchan-0a1b2c3d4e50")
-	if err := s.SaveState(); err != nil {
-		t.Fatal(err)
-	}
-	ts2, _ := newSignInServer(t, f, path)
-	registerGuest(t, ts2, token, "stackchan-0a1b2c3d4e50")
-}
-
-func TestFleetPageServed(t *testing.T) {
-	ts, _ := newTestServer(t)
-	resp, err := newBrowser().Get(ts.URL + "/robots")
-	if err != nil {
-		t.Fatal(err)
-	}
-	b, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(b), "<title>Your robots") {
-		t.Fatalf("GET /robots: %d %.80s", resp.StatusCode, b)
 	}
 }
 

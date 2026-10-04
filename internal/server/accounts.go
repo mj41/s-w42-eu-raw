@@ -12,10 +12,8 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -166,31 +164,6 @@ func emailTrusted(a Account) bool {
 	return false
 }
 
-// robotsPerAccount is how many robots an account may add: by its tier, tier 4 by
-// -robots-per-account.
-func (s *Server) robotsPerAccount(a Account) int {
-	if n := tierTable[s.accountTier(a, time.Now())].Robots; n > 0 {
-		return n
-	}
-	if s.cfg.RobotsPerAccount > 0 {
-		return s.cfg.RobotsPerAccount
-	}
-	return defaultRobotsPerAccount
-}
-
-// ownedInviteOK reports whether token is the self-service invite token of robot id.
-func (s *Server) ownedInviteOK(id, token string) bool {
-	s.mu.Lock()
-	inv, found := s.owned[id]
-	s.mu.Unlock()
-	want, err := hex.DecodeString(inv.Hash)
-	if err != nil || len(want) != sha256.Size {
-		want = make([]byte, sha256.Size) // compare anyway: timing must not tell which ids exist
-	}
-	got := sha256.Sum256([]byte(token))
-	return subtle.ConstantTimeCompare(got[:], want) == 1 && found && token != ""
-}
-
 // GET /auth/login: off to the provider.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if s.oidc == nil {
@@ -319,14 +292,6 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-type myRobot struct {
-	ID      string    `json:"id"`
-	Created time.Time `json:"created,omitzero"`
-	Online  bool      `json:"online"`
-	Public  bool      `json:"public"`
-	Added   bool      `json:"added"` // false: one of the server's own robots (admins)
-}
-
 // robotURL is the address robots connect to: the public URL with ws:// or wss://.
 func (s *Server) robotURL() string {
 	return strings.Replace(strings.Replace(strings.TrimRight(s.cfg.PublicURL, "/"), "https://", "wss://", 1), "http://", "ws://", 1)
@@ -348,177 +313,18 @@ func (s *Server) robotURLReachable() bool {
 	return true
 }
 
-// localSetup tells whether this request may set a robot up with the server's own robot token,
-// without an account: only on a server without sign-in, and only from a browser on this
-// computer (loopback address and host name, no proxy in between). That is the owner, who can
-// read the token file anyway; on another computer the page asks for the URL and the token.
-func (s *Server) localSetup(r *http.Request) bool {
-	if s.oidc != nil || s.cfg.RobotToken == "" || s.cfg.TrustedProxies > 0 ||
-		r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("Forwarded") != "" {
-		return false
-	}
-	isLoopback := func(hostport string) bool {
-		host := hostport
-		if h, _, err := net.SplitHostPort(hostport); err == nil {
-			host = h
-		}
-		host = strings.Trim(host, "[]")
-		if strings.EqualFold(host, "localhost") {
-			return true
-		}
-		ip, err := netip.ParseAddr(host)
-		return err == nil && ip.IsLoopback()
-	}
-	return isLoopback(r.RemoteAddr) && isLoopback(r.Host)
-}
-
 // GET /api/me
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	session := s.session(w, r)
+	me := map[string]any{"sign_in": s.oidc != nil, "manager_url": s.cfg.ManagerURL}
 	a, ok := s.account(session)
-	if !ok {
-		t := s.sessionTier(session, time.Now())
-		writeJSON(w, http.StatusOK, map[string]any{"signed_in": false, "sign_in": s.oidc != nil,
-			"tier": t, "tier_hint": s.tierHint(t), "full_video": tierTable[t].FullVideo,
-			"local_setup": s.localSetup(r), "robot_url": s.robotURL(), "robot_reachable": s.robotURLReachable()})
-		return
-	}
-	tier := s.accountTier(a, time.Now())
-	s.mu.Lock()
-	s.pairOwnedLocked(session, a) // robots added or connected since sign-in
-	online := func(id string) bool { st := s.robots[id]; return st != nil && st.conn != nil }
-	robots := []myRobot{}
-	for _, inv := range s.owned {
-		if inv.Owner == a.Key {
-			robots = append(robots, myRobot{ID: inv.RobotID, Created: inv.Created, Online: online(inv.RobotID),
-				Public: s.public[inv.RobotID], Added: true})
-		}
-	}
-	if s.isAdmin(a) {
-		for id := range s.ownerRobots {
-			if _, added := s.owned[id]; !added {
-				robots = append(robots, myRobot{ID: id, Online: online(id), Public: s.public[id]})
-			}
-		}
-	}
-	s.mu.Unlock()
-	slices.SortFunc(robots, func(x, y myRobot) int { return strings.Compare(x.ID, y.ID) })
-	writeJSON(w, http.StatusOK, map[string]any{
-		"signed_in": true, "sign_in": true, "name": a.Name, "email": a.Email,
-		"admin": s.isAdmin(a), "limit": s.robotsPerAccount(a), "robots": robots,
-		"tier": tier, "tier_hint": s.tierHint(tier), "full_video": tierTable[tier].FullVideo,
-		"robot_url": s.robotURL(), "robot_reachable": s.robotURLReachable(),
-	})
-}
-
-// POST /api/my/robots {"robot_id"}: add a robot, or a new token for one of your own.
-func (s *Server) handleAddMyRobot(w http.ResponseWriter, r *http.Request) {
-	if !sameOrigin(r) {
-		http.Error(w, "cross-origin request refused", http.StatusForbidden)
-		return
-	}
-	a, ok := s.account(s.session(w, r))
-	if !ok {
-		http.Error(w, "sign in first", http.StatusUnauthorized)
-		return
-	}
-	var req struct {
-		RobotID string `json:"robot_id"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&req); err != nil {
-		http.Error(w, `body must be {"robot_id": "..."}`, http.StatusBadRequest)
-		return
-	}
-	id := strings.ToLower(strings.TrimSpace(req.RobotID))
-	token, line, err := NewRobotInvite(id)
-	if err != nil {
-		http.Error(w, "invalid robot id: it looks like stackchan-0a1b2c3d4e50", http.StatusBadRequest)
-		return
-	}
-	hash := strings.Fields(line)[1]
-	if s.invites != nil && s.invites.has(id) {
-		http.Error(w, "this robot id is already invited on this server", http.StatusConflict)
-		return
-	}
-
-	s.mu.Lock()
-	if s.ownerRobots[id] && !s.isAdmin(a) {
+	if ok {
+		s.mu.Lock()
+		s.pairOwnedLocked(session, a) // robots that connected since sign-in
 		s.mu.Unlock()
-		http.Error(w, "this robot id belongs to the server's owner", http.StatusConflict)
-		return
+		me["name"], me["email"], me["admin"] = a.Name, a.Email, s.isAdmin(a)
 	}
-	old, exists := s.owned[id]
-	if exists && old.Owner != a.Key {
-		s.mu.Unlock()
-		http.Error(w, "another account already added this robot", http.StatusConflict)
-		return
-	}
-	if !exists && !s.isAdmin(a) {
-		n := 0
-		for _, inv := range s.owned {
-			if inv.Owner == a.Key {
-				n++
-			}
-		}
-		if n >= s.robotsPerAccount(a) {
-			s.mu.Unlock()
-			http.Error(w, fmt.Sprintf("you can add up to %d robots", s.robotsPerAccount(a)), http.StatusForbidden)
-			return
-		}
-	}
-	s.owned[id] = ownedInvite{RobotID: id, Hash: hash, Owner: a.Key, OwnerName: a.Name, Created: time.Now()}
-	delete(s.ownerRobots, id) // an admin added their own robot: from now on it uses its own token
-	if !exists {
-		delete(s.public, id) // a newly added robot starts private
-	}
-	s.pairOwnedLocked(s.session(w, r), a)
-	var conn *robotConn
-	if st := s.robots[id]; st != nil && exists {
-		conn = st.conn // connected with the old token: it must use the new one
-	}
-	s.mu.Unlock()
-	if conn != nil {
-		conn.close()
-	}
-	s.requestSave()
-	s.log.Info("robot added by account", "robot", id, "account", accountLogID(a.Key), "new_token", exists)
-
-	serverURL := s.robotURL()
-	writeJSON(w, http.StatusOK, map[string]any{
-		"robot_id": id, "token": token, "server_url": serverURL,
-		"sdkconfig": fmt.Sprintf("CONFIG_STACKCHAN_EMBODY_SERVER_URL=%q\nCONFIG_STACKCHAN_EMBODY_TOKEN=%q\n", serverURL, token),
-	})
-}
-
-// DELETE /api/my/robots/{id}: revoke one of your robots (admins: any added robot).
-func (s *Server) handleRemoveMyRobot(w http.ResponseWriter, r *http.Request) {
-	if !sameOrigin(r) {
-		http.Error(w, "cross-origin request refused", http.StatusForbidden)
-		return
-	}
-	a, ok := s.account(s.session(w, r))
-	if !ok {
-		http.Error(w, "sign in first", http.StatusUnauthorized)
-		return
-	}
-	id := r.PathValue("id")
-	s.mu.Lock()
-	inv, exists := s.owned[id]
-	if !exists || (inv.Owner != a.Key && !s.isAdmin(a)) {
-		s.mu.Unlock()
-		http.NotFound(w, r)
-		return
-	}
-	delete(s.owned, id)
-	var conn *robotConn
-	if st := s.robots[id]; st != nil {
-		conn = st.conn
-	}
-	s.mu.Unlock()
-	if conn != nil {
-		conn.close()
-	}
-	s.requestSave()
-	s.log.Info("robot removed by account", "robot", id, "account", accountLogID(a.Key))
-	w.WriteHeader(http.StatusNoContent)
+	t := s.sessionTier(session, time.Now())
+	me["signed_in"], me["tier"], me["tier_hint"], me["full_video"] = ok, t, s.tierHint(t), tierTable[t].FullVideo
+	writeJSON(w, http.StatusOK, me)
 }

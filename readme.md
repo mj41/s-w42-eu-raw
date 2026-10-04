@@ -6,7 +6,7 @@ Relay between M5Stack Stackchan robots and web browsers for **Embody Mode**. It 
 - **Browser:** scans the robot's QR code to pair, then gets a live dashboard.
 - **Server:** one Go binary with the web page built in. State lives in memory and is saved to a JSON file, so pairings survive a restart.
 
-The robot side is the [Embody Mode app](https://github.com/mj41/StackChan/tree/embody-mj41/firmware/main/apps/app_embody_mode) in the StackChan firmware fork [mj41/StackChan](https://github.com/mj41/StackChan/tree/embody-mj41) (branch `embody-mj41`). **Setting up a robot:** plug it in and press one button on [chan.w42.eu/setup](https://chan.w42.eu/setup) in Chrome ([below](#set-a-robot-up-over-usb)); with your own server or your own firmware build: [SETUP.md](https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/SETUP.md).
+The robot side is the [Embody Mode app](https://github.com/mj41/StackChan/tree/embody-mj41/firmware/main/apps/app_embody_mode) in the StackChan firmware fork [mj41/StackChan](https://github.com/mj41/StackChan/tree/embody-mj41) (branch `embody-mj41`). **Setting up a robot** is the Stackchan manager's job ([s-w42-eu-manager](https://github.com/mj41/s-w42-eu-manager)): one button on its `/setup` page in Chrome installs the firmware and gives the robot the apps you approve, this one among them; your own firmware build: [SETUP.md](https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/SETUP.md).
 
 Part of [home-w42-eu](https://github.com/mj41/home-w42-eu), a local first, privacy first platform for a home: this repo holds the Go implementation of its device wire protocol (the `wire` package), which the other servers use too.
 
@@ -71,47 +71,49 @@ go run ./cmd/fake-robot                    # simulated robot, in a second termin
 - `-offer name=wss://host[,tokenfile]` (repeatable) offers robots other servers they may switch to; with a token file, the robot also gets that server's robot token. Offers are voluntary: a server decides where its robots may go, and the robot owner can also add servers by hand. Offers go only to robots with the shared token, never to invited robots (below).
 - `-robot-tokens-file <file>`: other people's robots, each with its own invite token (see "Other people's robots" below). Off by default.
 - `-trusted-proxies 1` behind one reverse proxy that appends the client address to `X-Forwarded-For` (Envoy, nginx with `$proxy_add_x_forwarded_for`). The default 0 ignores that header, because clients can forge it. Limits and logs use the address.
-- **Limits:** 20 failed logins per address and robot id in 10 minutes, then HTTP 429 for that robot from that address, right token included (other robots behind the same address keep working); 20 wrong pairing codes per address in 10 minutes, then 429. Invited robots may send 300 messages/s and 512 KB/s on average (bursts of 1000 messages and 4 MB), and are disconnected above that; the owner's robots are not limited. Browsers: at most 8 open event streams per session and 30 per address, and 20 media sockets per address; media sockets per session and robot, and commands, pictures or uploads per second per session, depend on the tier (**Tiers** in [Other people's robots](#other-peoples-robots-sign-in-and-add-your-own); without sign-in everybody is tier 1: 4 sockets, 20 per second, bursts of 60); above that HTTP 429.
+- **Limits:** 20 failed logins per address and robot id in 10 minutes, then HTTP 429 for that robot from that address, right token included (other robots behind the same address keep working); 20 wrong pairing codes per address in 10 minutes, then 429. Invited robots may send 300 messages/s and 512 KB/s on average (bursts of 1000 messages and 4 MB), and are disconnected above that; the owner's robots are not limited. Browsers: at most 8 open event streams per session and 30 per address, and 20 media sockets per address; media sockets per session and robot, and commands, pictures or uploads per second per session, depend on the tier (**Tiers** in [Robots set up by a manager](#robots-set-up-by-a-manager-and-sign-in); without sign-in everybody is tier 1: 4 sockets, 20 per second, bursts of 60); above that HTTP 429.
 - `-no-address-limits` turns the per-address limits off, for a server that cannot see client addresses (behind a TCP load balancer without the PROXY protocol, every client has the balancer's address, and one stranger's failures would lock everybody out). The send budgets for invited robots stay.
-- `-firmware-release latest` (the default; or a tag such as `embody-v0.1.0`, `""` for none): the official Embody Mode firmware for the setup page `/setup` (see "Set a robot up over USB" below), fetched from the [GitHub release](https://github.com/mj41/StackChan/releases), every part checked against the manifest's SHA-256, and kept in `~/.cache/stackchan-server/firmware`. `-firmware-dir <dir>` serves the same files from a directory instead. On a server with sign-in, only signed-in people get them.
+- `-manager-url https://manager.example -manager-secret-file <file>`: robots set up by a Stackchan manager connect with tokens it gave them for this app; this server asks the manager about them ([below](#robots-set-up-by-a-manager-and-sign-in)).
 - `-ui-dir internal/server/ui` serves the dashboard from disk on every request (development). UI edits then need only a page reload.
 - Open the dashboard with the same host as the QR code (e.g. `http://192.168.1.10:8765/`, not `localhost`). The pairing cookie belongs to that host.
 - Run `go test -race ./...` for the tests.
 
-### Other people's robots: sign in and add your own
+### Robots set up by a manager, and sign-in
 
-With an OpenID Connect provider (on chan.w42.eu: Dex at `https://auth.w42.eu`, with GitHub
-and Google), people add their robots themselves on the **Your robots** page (`/robots`):
-sign in, enter the robot id, and the page shows that robot's invite token **once**, with the
-two `sdkconfig` lines to use. The server keeps only the token's SHA-256, bound to the
-account; the page also lists your robots (online or not), gives a new token (the old one
-stops working at once) and removes them.
+A robot set up by a [Stackchan manager](https://github.com/mj41/s-w42-eu-manager) has a token
+of its own for this app. This server asks the manager about it when the robot connects
+(`POST <manager>/api/robot-auth`, with this app's secret) and learns whose robot it is and
+whether it is public; it keeps no robot tokens itself. With sign-in (an OpenID Connect provider,
+on w42.eu Dex at `https://auth.w42.eu`) owners use their robots here:
 
 ```bash
-s-w42-eu-raw -public-url https://chan.example \
-  -oidc-issuer https://auth.example -oidc-client-id chan -oidc-client-secret-file /secrets/oidc \
-  -admin-emails you@example.com -robots-per-account 3 -state-file /state/state.json \
+s-w42-eu-raw -public-url https://raw.example \
+  -manager-url https://manager.example -manager-secret-file /secrets/manager \
+  -oidc-issuer https://auth.example -oidc-client-id raw -oidc-client-secret-file /secrets/oidc \
+  -admin-emails you@example.com -state-file /state/state.json \
   -tiers-file /config/tiers -sponsor-url https://github.com/sponsors/you
 ```
 
 - **Private or public.** With sign-in configured, every robot is private by default: only its
-  owner, signed in, can pair with it and use it (the account that added it; for the
+  owner, signed in, can pair with it and use it (the account the manager names; for this
   server's own robots, the admins), and the owner's signed-in browsers get their robots
   without a code. Anyone else, even with the code from its screen, gets "this robot is
-  private". The owner can make a robot **public** on the Your robots page: then the code
-  pairs anyone, as on a server without sign-in. Making it private again unpairs everybody
-  else. Anonymous browsers cannot send "Ask a paired phone" requests, so they bother nobody.
+  private". The owner makes a robot **public** on the manager: then the code pairs anyone, as
+  on a server without sign-in, from the robot's next connection. Making it private again
+  unpairs everybody else. Anonymous browsers cannot send "Ask a paired phone" requests.
+- The manager's answers are cached for a minute; when the manager cannot be reached, a robot
+  it confirmed within the last hour may still connect. A refusal is never cached.
 - Without sign-in configured (a LAN server), every robot is public.
 - **Tiers** set the limits (not access: pairing still needs the robot's code, or a public
   robot):
 
-  | Tier | Who | Commands/s (burst) | Media sockets per robot | 640×480 video | Robots to add |
-  |---|---|---|---|---|---|
-  | 1 | `-admin-emails`, tier 1 in `-tiers-file` | 20 (60) | 4 | yes | 20 (admins: no limit) |
-  | 2 | sponsors (tier 2 in the file) | 20 (60) | 4 | yes | 10 |
-  | 3 | others the owner approved (tier 3) | 20 (60) | 4 | yes | 5 |
-  | 4 | signed in | 10 (30) | 2 | no (320×240) | `-robots-per-account` (3) |
-  | 5 | anonymous | 3 (15) | 1 | no | — |
+  | Tier | Who | Commands/s (burst) | Media sockets per robot | 640×480 video |
+  |---|---|---|---|---|
+  | 1 | `-admin-emails`, tier 1 in `-tiers-file` | 20 (60) | 4 | yes |
+  | 2 | sponsors (tier 2 in the file) | 20 (60) | 4 | yes |
+  | 3 | others the owner approved (tier 3) | 20 (60) | 4 | yes |
+  | 4 | signed in | 10 (30) | 2 | no (320×240) |
+  | 5 | anonymous | 3 (15) | 1 | no |
 
   Over a limit, the answer (429) says how to get more: tier 5 "Sign in for higher limits.",
   tier 4 "Sponsors get higher limits: `-sponsor-url`". The dashboard shows the tier next to
@@ -128,13 +130,11 @@ s-w42-eu-raw -public-url https://chan.example \
   `email:` (and `-admin-emails`) match only e-mails verified by GitHub or Google (not Microsoft: a tenant admin can set any e-mail there); `github:` (login) and `github-id:` (user id) match
   only through Dex's GitHub connector (scope `federated:id`). Without sign-in (a LAN server)
   everybody is tier 1.
-- Ids of robots that connected with the shared token belong to the owner: other accounts
-  cannot add them; an admin may add one, which from then on uses its own token. A robot
-  added by one account cannot be added by another.
+- Robots that connect with the shared token (`-token-file`) are this server's own: they belong
+  to the admins.
 - The login uses the authorization code flow with PKCE, a nonce and a one-time state bound
   to the browser session; changing requests must come from this server's origin.
-- Accounts and added robots live in the state file (`-state-file`), so it must be on
-  persistent storage.
+- Sign-ins live in the state file (`-state-file`), so it must be on persistent storage.
 
 ### Other people's robots: invite tokens (without sign-in)
 
@@ -169,70 +169,11 @@ the dashboard's `e2e.js`; `go run ./cmd/fake-robot -e2e` tests it without hardwa
 
 ## Set a robot up over USB
 
-No firmware build and no token in the firmware: the robot keeps its server list, token and
-Wi-Fi in its settings, and a computer writes them over the USB cable. Having the robot on the
-cable is the proof of ownership, like scanning its QR code.
-
-**In Chrome or Edge: `/setup`** (e.g. [chan.w42.eu/setup](https://chan.w42.eu/setup)). The
-page backs up the robot's firmware, installs the official firmware (Web Serial and
-[esptool-js](https://github.com/espressif/esptool-js)), and writes the server, the robot's
-token and Wi-Fi into it. The steps for users are in
-[SETUP.md](https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/SETUP.md):
-A (chan.w42.eu) and B (your own server). What this server does for it:
-
-- **With sign-in,** the page adds the robot to the signed-in account (`POST /api/my/robots`)
-  with a new token; the robot is private to that account.
-- **Without sign-in, on the server's own computer** (`http://localhost:8765/setup`),
-  `POST /api/setup/local` gives the page this server's address (the `-public-url`, by default
-  `ws://<LAN IP>:8765`), its robot token, the other apps it offers (`-offer`, e.g. Pet or Sbot,
-  with their tokens) and this computer's Wi-Fi (name and password from NetworkManager on Linux
-  or netsh on Windows; only the name on macOS). It answers only same-origin requests from a
-  browser on the same computer (loopback address and host name, no proxy). **Copy setup for
-  another computer** on that page gives the same as JSON, for the setup page elsewhere
-  (Options, Server, "My own server"); it holds the robot token and the Wi-Fi password, so keep
-  it private:
-
-  ```json
-  {"server": {"name": "192.168.1.10:8765", "url": "ws://192.168.1.10:8765", "token": "…"},
-   "apps": [{"name": "Pet", "url": "ws://192.168.1.10:8770", "token": "…"}],
-   "wifi": {"ssid": "Home", "password": "…"}}
-  ```
-
-- **App** on the page (when there is more than the dashboard, i.e. from your own server's
-  setup) picks the server the robot starts with, pinned as its default.
-
-**The firmware.** `/setup` installs only the official `embody-v*` release of
-[mj41/StackChan](https://github.com/mj41/StackChan/releases) (`manifest.json` and its parts,
-built by CI from the one firmware source with its release configuration), never an uploaded
-image. The server fetches it (`-firmware-release`) or serves it from `-firmware-dir`, at
-`/firmware/{file}`; the server and the page both check every part against the manifest's
-SHA-256. On a server with sign-in, only signed-in people get it. The release has no server and
-no token inside: those are the robot's settings, written over USB. Until it is set up, the
-robot's Embody Mode shows "Set up: chan.w42.eu/setup".
-
-**From a terminal: `s-w42-eu-usb`**, the same over USB for developers and scripts (the robot
-must already have firmware with USB setup):
-
-```bash
-go run ./cmd/stackchan-usb hello        # the robot id, firmware and protocol
-go run ./cmd/stackchan-usb provision -url ws://192.168.1.10:8765 -name home \
-  -token-file ~/.config/stackchan-server/robot-token -default -autostart
-go run ./cmd/stackchan-usb provision -wifi-ssid Home -wifi-password-file wifi.txt
-go run ./cmd/stackchan-usb restart      # into Embody Mode
-go run ./cmd/stackchan-usb pair         # the pairing link the robot shows, to open in a browser
-# with automation in the firmware (the release has it): what a person at the robot does
-go run ./cmd/stackchan-usb screenshot -o screen.jpg
-go run ./cmd/stackchan-usb tap -x 268 -y 25        # the first tap asks on the robot's screen
-go run ./cmd/stackchan-usb launch -app "Embody Mode"
-```
-
-- It finds the robot by its USB vendor (Espressif, 0x303A); `-port /dev/ttyACM1` picks another.
-- Secrets come from files, never from the command line.
-- A `provision` that changes the default server asks on the robot's screen first: tap Yes
-  within a minute, or nothing is changed.
-- `-autostart` needs firmware built with automation (the release build has it).
-- The protocol: lines `@stackchan <JSON>` on the USB serial port, described in the firmware's
-  [usb_setup.h](https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/usb_setup.h).
+Moved to the Stackchan manager, [s-w42-eu-manager](https://github.com/mj41/s-w42-eu-manager):
+its `/setup` page (Chrome, Web Serial) installs the official firmware and writes the approved
+apps with their tokens into the robot, and its `s-w42-eu-usb` does the same from a terminal.
+For a robot of this server alone, a home manager's catalog lists this server with its shared
+token (`token_file`).
 
 ## Running in a container
 
@@ -361,21 +302,16 @@ How this server uses them:
 ### Browser API
 
 Every browser gets a session cookie. Endpoints under `/api/robots/{id}` need a session paired
-with that robot, `/api/my/*` a signed-in one; requests that change something must come from
+with that robot; requests that change something must come from
 this server's origin.
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /`, `GET /robots`, `GET /setup` | the dashboard, Your robots (sign-in), and the USB setup page |
+| `GET /` | the dashboard |
 | `GET /pair?code=…` | QR target; adds the robot to this browser's session |
 | `GET /api/info` | about this server: `https_url` when it has an HTTPS listener (`-tls-listen`) |
-| `GET /api/me` | sign-in state, tier and its hint, whether 640×480 video is allowed; signed in also the account, its robot limit and robots |
+| `GET /api/me` | sign-in state, tier and its hint, whether 640×480 video is allowed, the manager's URL; signed in also the account |
 | `GET /auth/login`, `GET /auth/callback`, `POST /auth/logout` | sign-in with the OpenID Connect provider (only with `-oidc-issuer`) |
-| `POST /api/my/robots` | `{"robot_id"}`: add a robot to your account, or a new token for one of yours; returns `{"robot_id", "token", "server_url", "sdkconfig"}` |
-| `DELETE /api/my/robots/{id}` | remove one of your robots (admins: any added robot); it is disconnected |
-| `POST /api/my/robots/{id}/access` | `{"public": bool}`: make your robot public or private (private unpairs everybody else) |
-| `POST /api/setup/local` | the setup for a robot of this server (above, [Set a robot up over USB](#set-a-robot-up-over-usb)); only without sign-in, from the same computer (loopback) |
-| `GET /firmware/{file}` | the official firmware for `/setup` (`manifest.json` and its parts); with sign-in, only for signed-in people |
 | `POST /api/join` | an unpaired browser asks paired browsers for access; returns `{"id", "code", "from", "agent", "expires"}`. Paired browsers get a `join_request` SSE event (also replayed when they connect) |
 | `POST /api/join/{id}/approve`, `…/deny` | a paired browser answers; approve pairs the requester with the approver's robots. The requester gets `join_result` `{"status"}`, the other paired browsers `join_closed` |
 | `GET /api/robots` | paired robots (JSON) |

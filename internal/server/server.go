@@ -8,6 +8,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"embed"
@@ -24,7 +25,7 @@ import (
 	"github.com/mj41/s-w42-eu-raw/wire"
 )
 
-//go:embed ui/index.html ui/robots.html ui/setup.html ui/e2e.js ui/emoji ui/vendor
+//go:embed ui/index.html ui/e2e.js ui/emoji
 var uiFS embed.FS
 
 // Config configures a Server.
@@ -34,28 +35,27 @@ type Config struct {
 	TrustedProxies  int    // reverse proxies in front that append to X-Forwarded-For (see clientIP); 0 ignores it
 	NoAddressLimits bool   // the server cannot see client addresses (e.g. behind a TCP load balancer): no per-address limits
 
-	// Sign-in (OpenID Connect, e.g. Dex at auth.w42.eu) for self-service robot invites
+	// Robots set up by a Stackchan manager (manager.go): it is asked about their tokens.
+	ManagerURL    string // e.g. https://sm.w42.eu; "" = no manager
+	ManagerSecret string // this app's secret at the manager
+
+	// Sign-in (OpenID Connect, e.g. Dex at auth.w42.eu), so owners can use their private robots
 	// (accounts.go). OIDCIssuer and OIDCClientID empty: no sign-in.
 	OIDCIssuer       string
 	OIDCClientID     string
 	OIDCClientSecret string
 	OIDCRedirectURL  string   // default PublicURL + /auth/callback
-	AdminEmails      []string // verified e-mails without the per-account robot limit, who may remove any added robot
-	RobotsPerAccount int      // tier 4's robots per account, default 3
+	AdminEmails      []string // verified e-mails of the owners of this server's own robots (shared token)
 	TiersFile        string   // tiers 1-3 by e-mail or GitHub login (tiers.go); empty: only admins are tier 1
 	SponsorURL       string   // where tier 4 is pointed when a limit is hit
 
-	FirmwareDir      string               // the official firmware (manifest.json and its parts) for /setup, from disk; wins over FirmwareRelease
-	FirmwareRelease  string               // else fetched from its GitHub release: "latest" or a tag (embody-v…); "" = no firmware
-	FirmwareCacheDir string               // where fetched parts are kept, by SHA-256; "" = not kept
-	FirmwareBaseURL  string               // default https://github.com/mj41/StackChan/releases (tests)
-	PublicURL        string               // base URL browsers use, e.g. http://192.168.1.10:8765
-	PairTTL          time.Duration        // lifetime of a pairing code
-	UIDir            string               // development: serve index.html from this directory instead of the embedded copy
-	StateFile        string               // JSON snapshot of pairings and robots, loaded by New (see state.go); "" disables
-	HTTPSPort        string               // port of the HTTPS listener for browsers, if any; advertised by /api/info
-	Offers           []wire.OfferedServer // other servers robots may switch to, sent as ServerOffer
-	Log              *slog.Logger
+	PublicURL string               // base URL browsers use, e.g. http://192.168.1.10:8765
+	PairTTL   time.Duration        // lifetime of a pairing code
+	UIDir     string               // development: serve index.html from this directory instead of the embedded copy
+	StateFile string               // JSON snapshot of pairings and robots, loaded by New (see state.go); "" disables
+	HTTPSPort string               // port of the HTTPS listener for browsers, if any; advertised by /api/info
+	Offers    []wire.OfferedServer // other servers robots may switch to, sent as ServerOffer
+	Log       *slog.Logger
 }
 
 // Server holds all state in memory. With Config.StateFile, pairings and known
@@ -64,11 +64,11 @@ type Server struct {
 	cfg Config
 	log *slog.Logger
 
-	mu       sync.Mutex
-	robots   map[string]*robotState // by robot id; kept after disconnect
-	codes    map[string]pairCode    // one-time pairing codes
-	invites  *robotInvites          // per-robot invite tokens (nil: none)
-	firmware *firmwareRelease       // the official firmware from GitHub (nil: none or FirmwareDir)
+	mu      sync.Mutex
+	robots  map[string]*robotState // by robot id; kept after disconnect
+	codes   map[string]pairCode    // one-time pairing codes
+	invites *robotInvites          // per-robot invite tokens (nil: none)
+	manager *managerClient         // nil: no manager
 
 	oidc        *oidcLogin             // nil: no sign-in
 	logins      map[string]Account     // browser session id -> signed-in account
@@ -182,13 +182,7 @@ func New(cfg Config) *Server {
 		ownerRobots:  map[string]bool{},
 		public:       map[string]bool{},
 	}
-	if cfg.FirmwareDir == "" && cfg.FirmwareRelease != "" {
-		base := cfg.FirmwareBaseURL
-		if base == "" {
-			base = firmwareReleases
-		}
-		s.firmware = newFirmwareRelease(base, cfg.FirmwareRelease, cfg.FirmwareCacheDir)
-	}
+	s.manager = newManagerClient(cfg.ManagerURL, cfg.ManagerSecret)
 	if cfg.RobotTokensFile != "" {
 		s.invites = newRobotInvites(cfg.RobotTokensFile)
 		if _, err := s.invites.ok("", "-"); err != nil {
@@ -212,19 +206,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /pair", s.handlePair)
 	mux.HandleFunc("GET /api/robots", s.handleListRobots)
 	mux.HandleFunc("GET /api/info", s.handleInfo)
-	mux.HandleFunc("GET /robots", s.handleFleetPage)
 	mux.HandleFunc("GET /e2e.js", s.handleE2EScript)
-	mux.HandleFunc("GET /setup", s.handleSetupPage)
-	mux.HandleFunc("GET /vendor/{file}", s.handleVendor)
-	mux.HandleFunc("GET /firmware/{file}", s.handleFirmware)
 	mux.HandleFunc("GET /auth/login", s.handleLogin)
 	mux.HandleFunc("GET /auth/callback", s.handleAuthCallback)
 	mux.HandleFunc("POST /auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/me", s.handleMe)
-	mux.HandleFunc("POST /api/my/robots", s.handleAddMyRobot)
-	mux.HandleFunc("POST /api/setup/local", s.handleSetupLocal)
-	mux.HandleFunc("DELETE /api/my/robots/{id}", s.handleRemoveMyRobot)
-	mux.HandleFunc("POST /api/my/robots/{id}/access", s.handleRobotAccess)
 	mux.HandleFunc("POST /api/join", s.handleJoinRequest)
 	mux.HandleFunc("POST /api/join/{id}/{decision}", s.handleJoinDecision)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
@@ -239,9 +225,10 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// robotAuth checks a connecting robot's token: the shared token (an owner robot) or the
-// robot's own invite token (a guest). ok is false for neither.
-func (s *Server) robotAuth(id, token string) (ok, guest bool) {
+// robotAuth checks a connecting robot's token: the shared token (an owner robot), the robot's
+// own invite token (-robot-tokens-file), or a token the manager gave it for this app (then the
+// manager says whose robot it is). ok is false for none of them; the last two are guests.
+func (s *Server) robotAuth(ctx context.Context, id, token string) (ok, guest bool) {
 	if s.tokenOK(token) {
 		return true, false
 	}
@@ -249,10 +236,20 @@ func (s *Server) robotAuth(id, token string) (ok, guest bool) {
 	if err != nil {
 		s.log.Warn("robot tokens file", "err", err)
 	}
-	if !invited {
-		invited = s.ownedInviteOK(id, token)
+	if invited || s.manager == nil || token == "" {
+		return invited, invited
 	}
-	return invited, invited
+	auth, err := s.manager.check(ctx, id, token)
+	if err != nil {
+		s.log.Warn("manager", "robot", id, "err", err)
+	}
+	if !auth.OK {
+		return false, false
+	}
+	s.mu.Lock()
+	s.managedRobotLocked(id, auth)
+	s.mu.Unlock()
+	return true, true
 }
 
 func (s *Server) tokenOK(token string) bool {

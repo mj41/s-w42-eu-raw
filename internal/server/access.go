@@ -8,10 +8,7 @@ package server
 // their robots without a code. Anonymous browsers cannot send join requests, so they cannot
 // bother anyone. Without sign-in configured, every robot is public (a LAN server).
 
-import (
-	"encoding/json"
-	"net/http"
-)
+import ()
 
 // mayPairLocked reports whether the browser session may pair with robotID. Must hold s.mu.
 func (s *Server) mayPairLocked(session, robotID string) bool {
@@ -72,45 +69,4 @@ func (s *Server) unpairOthersLocked(robotID string) (dropped int) {
 		s.requestSave()
 	}
 	return dropped
-}
-
-// POST /api/my/robots/{id}/access {"public": bool}: the owner makes a robot public or private.
-func (s *Server) handleRobotAccess(w http.ResponseWriter, r *http.Request) {
-	if !sameOrigin(r) {
-		http.Error(w, "cross-origin request refused", http.StatusForbidden)
-		return
-	}
-	a, ok := s.account(s.session(w, r))
-	if !ok {
-		http.Error(w, "sign in first", http.StatusUnauthorized)
-		return
-	}
-	var req struct {
-		Public *bool `json:"public"`
-	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&req); err != nil || req.Public == nil {
-		http.Error(w, `body must be {"public": true|false}`, http.StatusBadRequest)
-		return
-	}
-	id := r.PathValue("id")
-	s.mu.Lock()
-	_, added := s.owned[id]
-	known := added || s.ownerRobots[id]
-	if !known || !s.ownsLocked(a, id) {
-		s.mu.Unlock()
-		http.NotFound(w, r)
-		return
-	}
-	dropped := 0
-	if *req.Public {
-		s.public[id] = true
-	} else {
-		delete(s.public, id)
-		dropped = s.unpairOthersLocked(id)
-	}
-	s.requestSave()
-	s.mu.Unlock()
-	s.broadcast(id)
-	s.log.Info("robot access", "robot", id, "public", *req.Public, "unpaired", dropped, "account", accountLogID(a.Key))
-	writeJSON(w, http.StatusOK, map[string]any{"public": *req.Public, "unpaired": dropped})
 }

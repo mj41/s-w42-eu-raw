@@ -2,7 +2,6 @@ package server
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/fs"
 	"mime"
@@ -38,62 +37,7 @@ func (s *Server) handleE2EScript(w http.ResponseWriter, r *http.Request) {
 	w.Write(js)
 }
 
-// handleSetupPage (GET /setup): set a robot up over USB in Chrome (flash, token, Wi-Fi).
-func (s *Server) handleSetupPage(w http.ResponseWriter, r *http.Request) {
-	s.servePage(w, r, "setup.html")
-}
-
 var fileName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
-
-// handleVendor (GET /vendor/{file}): third-party scripts kept in this server (ui/vendor).
-func (s *Server) handleVendor(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("file")
-	b, err := uiFS.ReadFile("ui/vendor/" + name)
-	if !fileName.MatchString(name) || !strings.HasSuffix(name, ".js") || err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-	w.Header().Set("Cache-Control", "public, max-age=86400")
-	w.Write(b)
-}
-
-// handleFirmware (GET /firmware/{file}): the published firmware for the setup page, served
-// from this origin (browsers cannot fetch GitHub release files: no CORS).
-func (s *Server) handleFirmware(w http.ResponseWriter, r *http.Request) {
-	name := r.PathValue("file")
-	if !fileName.MatchString(name) || (s.cfg.FirmwareDir == "" && s.firmware == nil) {
-		http.NotFound(w, r)
-		return
-	}
-	// With sign-in (a public server), installing firmware is for signed-in people.
-	if s.oidc != nil {
-		if _, ok := s.account(s.session(w, r)); !ok {
-			http.Error(w, "sign in first", http.StatusUnauthorized)
-			return
-		}
-	}
-	if s.cfg.FirmwareDir == "" {
-		if err := s.firmware.serve(w, r, name); err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				s.log.Warn("firmware release", "file", name, "err", err)
-			}
-			http.Error(w, "the firmware release is not available", http.StatusNotFound)
-		}
-		return
-	}
-	if name == "manifest.json" {
-		w.Header().Set("Cache-Control", "no-cache")
-	} else {
-		w.Header().Set("Content-Type", "application/octet-stream")
-	}
-	http.ServeFileFS(w, r, os.DirFS(s.cfg.FirmwareDir), name)
-}
-
-// handleFleetPage (GET /robots): sign in, your robots, adding one.
-func (s *Server) handleFleetPage(w http.ResponseWriter, r *http.Request) {
-	s.servePage(w, r, "robots.html")
-}
 
 func (s *Server) servePage(w http.ResponseWriter, r *http.Request, name string) {
 	s.session(w, r)

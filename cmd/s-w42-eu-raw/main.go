@@ -54,12 +54,11 @@ func main() {
 		oidcClientID   = flag.String("oidc-client-id", "", "sign-in: this server's client id at the issuer")
 		oidcSecretFile = flag.String("oidc-client-secret-file", "", "sign-in: file with the client secret")
 		oidcRedirect   = flag.String("oidc-redirect-url", "", "sign-in: callback URL registered at the issuer (default <public-url>/auth/callback)")
-		adminEmails    = flag.String("admin-emails", "", "comma-separated verified e-mails with no robot limit, who may remove any added robot")
-		robotsPerAcct  = flag.Int("robots-per-account", 3, "how many robots one signed-in account (tier 4) may add")
+		adminEmails    = flag.String("admin-emails", "", "comma-separated verified e-mails of the owners of this server's own robots (the shared token)")
+		managerURL     = flag.String("manager-url", "", "the Stackchan manager that set robots up with tokens for this app, e.g. https://sm.w42.eu (\"\" = none)")
+		managerSecret  = flag.String("manager-secret-file", "", "file with this app's secret at the manager")
 		tiersFile      = flag.String("tiers-file", "", "tiers 1-3 by e-mail or GitHub login, one \"<tier> <email:|github:|github-id:>who\" per line, re-read when it changes (with sign-in only)")
 		sponsorURL     = flag.String("sponsor-url", "", "where signed-in people are pointed when they hit a limit")
-		firmwareDir    = flag.String("firmware-dir", "", "the official Embody Mode firmware (manifest.json and its parts) for the setup page /setup, from this directory instead of GitHub")
-		firmwareRel    = flag.String("firmware-release", "latest", "else the official firmware for /setup from this GitHub release of mj41/StackChan: latest, a tag (embody-v…), or \"\" for none (/setup then only sets up robots that already have it)")
 		offers         offerFlags
 	)
 	flag.Var(&offers, "offer", "offer robots another server: name=wss://host[,tokenfile] (repeatable; the token file holds that server's robot token)")
@@ -111,12 +110,10 @@ func main() {
 		OIDCClientSecret: readSecretFile(*oidcSecretFile, log),
 		OIDCRedirectURL:  *oidcRedirect,
 		AdminEmails:      splitList(*adminEmails),
-		RobotsPerAccount: *robotsPerAcct,
 		TiersFile:        *tiersFile,
+		ManagerURL:       strings.TrimRight(*managerURL, "/"),
+		ManagerSecret:    readSecretFile(*managerSecret, log),
 		SponsorURL:       *sponsorURL,
-		FirmwareDir:      *firmwareDir,
-		FirmwareRelease:  *firmwareRel,
-		FirmwareCacheDir: firmwareCache(),
 		HTTPSPort:        httpsPort,
 		Offers:           offers,
 		Log:              log,
@@ -296,13 +293,4 @@ func splitList(s string) []string {
 		}
 	}
 	return out
-}
-
-// firmwareCache: where firmware fetched from GitHub is kept (~/.cache/stackchan-server/firmware).
-func firmwareCache() string {
-	dir, err := os.UserCacheDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(dir, "stackchan-server", "firmware")
 }

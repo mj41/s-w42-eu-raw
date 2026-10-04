@@ -48,14 +48,14 @@ func (u *user) pairedIDs() string {
 
 func TestPrivateRobotOnlyForItsOwner(t *testing.T) {
 	f := newFakeIssuer(t)
-	ts, _ := newSignInServer(t, f, "")
+	ts, _, m := newManagedServer(t, f, "")
 	ema, jan, anon := newUser(t, ts.URL), newUser(t, ts.URL), newUser(t, ts.URL)
 	ema.signIn(f, "ema", "ema@example.com", "Ema")
 	jan.signIn(f, "jan", "jan@example.com", "Jan")
 
 	const id = "stackchan-0a1b2c3d4e50"
-	_, token := ema.addRobot(id)
-	_, code := robotWithCode(t, ts, token, id)
+	m.set(id, "tok", f.ts.URL+"|ema", false)
+	rb, code := robotWithCode(t, ts, "tok", id)
 
 	// Private by default: the code from its screen pairs nobody but its owner.
 	if got := anon.pair(code); got != http.StatusForbidden {
@@ -69,22 +69,19 @@ func TestPrivateRobotOnlyForItsOwner(t *testing.T) {
 		t.Fatalf("owner's robots: %q", got)
 	}
 
-	// Public: the code pairs anyone; private again: the others are unpaired.
-	if code, body := ema.do("POST", "/api/my/robots/"+id+"/access", `{"public":true}`, true); code != http.StatusOK {
-		t.Fatalf("make public: %d %s", code, body)
-	}
+	// Made public on the manager: when the robot connects again, its code pairs anyone.
+	m.set(id, "tok-pub", f.ts.URL+"|ema", true) // a new setup: a new token (no cached answer)
+	rb.ws.Close()
+	_, code = robotWithCode(t, ts, "tok-pub", id)
 	if got := anon.pair(code); got != http.StatusSeeOther {
 		t.Fatalf("anonymous pairs a public robot: %d", got)
 	}
 	if got := anon.pairedIDs(); got != id {
 		t.Fatalf("anonymous after pairing: %q", got)
 	}
-	if code, _ := jan.do("POST", "/api/my/robots/"+id+"/access", `{"public":false}`, true); code != http.StatusNotFound {
-		t.Fatalf("someone else changes access: %d", code)
-	}
-	if code, body := ema.do("POST", "/api/my/robots/"+id+"/access", `{"public":false}`, true); code != http.StatusOK || !strings.Contains(body, `"unpaired":1`) {
-		t.Fatalf("make private: %d %s", code, body)
-	}
+	// Private again: the others are unpaired, the owner keeps it.
+	m.set(id, "tok-priv", f.ts.URL+"|ema", false)
+	robotWithCode(t, ts, "tok-priv", id)
 	if got := anon.pairedIDs(); got != "" {
 		t.Fatalf("anonymous still paired after private: %q", got)
 	}
@@ -105,10 +102,6 @@ func TestServerRobotsBelongToAdmins(t *testing.T) {
 	boss.signIn(f, "boss", "boss@example.com", "Boss")
 	if got := boss.pairedIDs(); got != "stackchan-owner00001" {
 		t.Fatalf("admin's robots: %q", got)
-	}
-	_, body := boss.do("GET", "/api/me", "", false)
-	if !strings.Contains(body, `"id":"stackchan-owner00001"`) || !strings.Contains(body, `"added":false`) {
-		t.Fatalf("admin's /api/me: %s", body)
 	}
 }
 
