@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mj41/s-w42-eu-raw/robotauth"
 	"github.com/mj41/s-w42-eu-raw/wire"
 )
 
@@ -68,7 +69,7 @@ type Server struct {
 	robots  map[string]*robotState // by robot id; kept after disconnect
 	codes   map[string]pairCode    // one-time pairing codes
 	invites *robotInvites          // per-robot invite tokens (nil: none)
-	manager *managerClient         // nil: no manager
+	manager *robotauth.Client      // nil: no manager
 
 	oidc        *oidcLogin             // nil: no sign-in
 	logins      map[string]Account     // browser session id -> signed-in account
@@ -182,7 +183,7 @@ func New(cfg Config) *Server {
 		ownerRobots:  map[string]bool{},
 		public:       map[string]bool{},
 	}
-	s.manager = newManagerClient(cfg.ManagerURL, cfg.ManagerSecret)
+	s.manager = robotauth.New(cfg.ManagerURL, cfg.ManagerSecret)
 	if cfg.RobotTokensFile != "" {
 		s.invites = newRobotInvites(cfg.RobotTokensFile)
 		if _, err := s.invites.ok("", "-"); err != nil {
@@ -239,7 +240,7 @@ func (s *Server) robotAuth(ctx context.Context, id, token string) (ok, guest boo
 	if invited || s.manager == nil || token == "" {
 		return invited, invited
 	}
-	auth, err := s.manager.check(ctx, id, token)
+	auth, err := s.manager.Check(ctx, id, token)
 	if err != nil {
 		s.log.Warn("manager", "robot", id, "err", err)
 	}

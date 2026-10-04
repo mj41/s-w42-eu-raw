@@ -103,6 +103,8 @@ s-w42-eu-raw -public-url https://raw.example \
   unpairs everybody else. Anonymous browsers cannot send "Ask a paired phone" requests.
 - The manager's answers are cached for a minute; when the manager cannot be reached, a robot
   it confirmed within the last hour may still connect. A refusal is never cached.
+- Other apps check robot tokens the same way with the package
+  [`robotauth`](robotauth/robotauth.go) (`github.com/mj41/s-w42-eu-raw/robotauth`), e.g. the pet.
 - Without sign-in configured (a LAN server), every robot is public.
 - **Tiers** set the limits (not access: pairing still needs the robot's code, or a public
   robot):
