@@ -93,6 +93,7 @@
   <p class="sub" id="conn">Connecting…</p>
   <div id="joins"></div>
   <div id="robots"></div>
+  <div id="filespage" hidden></div>
   <div class="empty" id="empty" hidden>
     <p>No robot is paired with this browser yet. Open <b>Embody Mode</b> on the Stackchan
     and scan the QR code it shows, or:</p>
@@ -574,11 +575,13 @@ function makeCard(r) {
     const crc32 = (buf) => { let c = 0xFFFFFFFF; for (const b of new Uint8Array(buf)) c = crcTable[(c ^ b) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
     const kb = (n) => (n / 1024).toFixed(n < 10240 ? 1 : 0) + " KB";
     const note = (text) => { log.textContent = (text + "\n" + log.textContent).split("\n").slice(0, 8).join("\n"); };
+    const summary = el("span", { className: "muted", textContent: "…" });
     c.onAssets = (d) => {
       let files = [];
       try { files = JSON.parse(d.list || "{}").files || []; } catch { /* keep empty */ }
       space.textContent = d.mounted === 0 ? "No file store on the robot (partition not mounted)."
         : `${files.length} files · ${kb(d.free || 0)} free of ${kb(d.total || 0)}`;
+      summary.textContent = space.textContent;
       list.replaceChildren(...files.sort((a, b) => a.name.localeCompare(b.name)).map((f) => el("div", { className: "row", style: "margin-top:4px" }, [
         el("span", { className: "code", style: "min-width:180px", textContent: f.name }),
         el("span", { className: "muted", style: "font-size:0.85rem", textContent: `${kb(f.bytes)} · crc ${f.crc.toString(16).padStart(8, "0")}` }),
@@ -615,14 +618,19 @@ function makeCard(r) {
       }
       pick.value = "";
     };
-    sections.push(el("h2", { textContent: "Files" }), space, list,
+    // The list has its own view (#files/<robot>): in the card only a line and a link.
+    c.filesView = el("section", { className: "card" }, [el("h2", { textContent: "Files" }), space,
       el("div", { className: "row", style: "margin-top:10px" }, [folder, pick,
         el("button", { className: "soft", textContent: "Upload", onclick: upload }),
         el("button", { className: "soft", textContent: "Refresh", onclick: () => run("assets", {}, "list files") }),
         has("sprite") && el("button", { className: "soft", textContent: "Hide sprites", onclick: () => run("sprite_clear", {}, "hide sprites") })].filter(Boolean)),
       log,
       el("div", { className: "muted", style: "font-size:0.85rem;margin-top:6px",
-        textContent: "Pictures (PNG with transparency, JPEG) and sounds (WAV, 16-bit PCM) for apps, kept on the robot across reboots. Names: letters, digits, . _ - and / for folders." }));
+        textContent: "Pictures (PNG with transparency, JPEG) and sounds (WAV, 16-bit PCM) for apps, kept on the robot across reboots. Names: letters, digits, . _ - and / for folders." }),
+      list]);
+    sections.push(el("h2", { textContent: "Files" }), el("div", { className: "row" }, [summary,
+      el("a", { href: "#files/" + encodeURIComponent(c.id), textContent: "Manage files" })]));
+    c.refreshFiles = () => run("assets", {}, "list files");
     setTimeout(() => run("assets", {}, "list files"), 500);
   }
 
@@ -1301,7 +1309,7 @@ function makeCard(r) {
         s.value.textContent = reported + s.unit;
       }
     }
-    c.root.querySelectorAll("button, input, select").forEach((e) => { e.disabled = !r.online || e.dataset.alwaysDisabled === "1"; });
+    [c.root, c.filesView].filter(Boolean).forEach((root) => root.querySelectorAll("button, input, select").forEach((e) => { e.disabled = !r.online || e.dataset.alwaysDisabled === "1"; }));
     if (c.pingBtn) c.pingBtn.disabled = !r.online || c.pinging;
   };
   c.addEvent = (ev) => {
@@ -1363,6 +1371,25 @@ function makeCard(r) {
   return c;
 }
 
+// #files/<robot>: that robot's files on a page of their own; anything else: the dashboard.
+const filesPage = document.getElementById("filespage");
+function route() {
+  const m = location.hash.match(/^#files\/(.+)$/);
+  const c = m && cards.get(decodeURIComponent(m[1]));
+  if (c && c.filesView) {
+    filesPage.replaceChildren(
+      el("p", {}, [el("a", { href: "#", textContent: "← Dashboard" })]),
+      el("p", { className: "muted", textContent: "Files on " + c.id }), c.filesView);
+    filesPage.hidden = false;
+    list.hidden = true;
+    c.refreshFiles();
+  } else {
+    filesPage.hidden = true;
+    list.hidden = false;
+  }
+}
+window.addEventListener("hashchange", route);
+
 function upsert(r) {
   let c = cards.get(r.id);
   if (!c) {
@@ -1370,6 +1397,7 @@ function upsert(r) {
     cards.set(r.id, c);
     const ids = [...cards.keys()].sort();
     list.replaceChildren(...ids.map((id) => cards.get(id).root));
+    route();
   }
   if (r.e2e) {
     r = { ...r, telemetry: { ...r.telemetry, ...E2E.telemetry(r.id) } };

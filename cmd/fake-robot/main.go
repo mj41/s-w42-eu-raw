@@ -11,6 +11,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -31,7 +32,7 @@ import (
 var commands = []string{"ping", "nod", "shake", "look", "home", "emotion", "say", "leds", "brightness", "volume",
 	"sticker", "face", "image", "camera", "mic", "screensaver", "standby", "speaker", "nfc", "ir_send", "power_led",
 	"hold", "servo_power", "rotate", "snapshot", "camera_config", "camera_reg", "imu_stream", "touch_stream",
-	"server_add", "server_remove", "server_default", "server_switch"}
+	"server_add", "server_remove", "server_default", "server_switch", "assets", "asset_delete"}
 
 func main() {
 	var (
@@ -91,6 +92,7 @@ func main() {
 
 // robot is the simulated state that commands change and telemetry reports.
 type robot struct {
+	assets              map[string]int // the file store: name -> size (seeded; no uploads)
 	started             time.Time
 	battery, yaw, pitch float64
 	brightness, volume  float64
@@ -331,6 +333,15 @@ func (r *robot) handle(c received, send func(string, any) error) error {
 				return err
 			}
 		}
+	case "assets":
+		return send(wire.KindRobotEvent, r.assetsEvent())
+	case "asset_delete":
+		name, _ := c.cmd.Args["name"].(string)
+		delete(r.assets, name)
+		if err := send(wire.KindRobotEvent, wire.RobotEventBody{Name: "asset_deleted", Data: map[string]any{"name": name}}); err != nil {
+			return err
+		}
+		return send(wire.KindRobotEvent, r.assetsEvent())
 	case "camera":
 		r.cameraOn, _ = c.cmd.Args["on"].(bool)
 	case "mic":
@@ -348,6 +359,30 @@ func (r *robot) handle(c received, send func(string, any) error) error {
 	}
 	r.log.Info("command received", "command", c.cmd.Command, "args", c.cmd.Args)
 	return send(wire.KindRobotTelemetry, wire.RobotTelemetryBody{Measurements: r.telemetry()})
+}
+
+// assetsEvent: the file store as the firmware reports it (the list as a JSON string).
+func (r *robot) assetsEvent() wire.RobotEventBody {
+	if r.assets == nil {
+		r.assets = map[string]int{}
+		for i := range 40 {
+			ext := []string{"png", "jpg", "wav"}[i%3]
+			r.assets[fmt.Sprintf("pet/item-%02d.%s", i, ext)] = 2000 + i*731%9000
+		}
+	}
+	type file struct {
+		Name  string `json:"name"`
+		Bytes int    `json:"bytes"`
+		CRC   uint32 `json:"crc"`
+	}
+	files, used := []file{}, 0
+	for name, n := range r.assets {
+		files = append(files, file{name, n, crc32.ChecksumIEEE([]byte(name))})
+		used += n
+	}
+	list, _ := json.Marshal(map[string]any{"files": files})
+	const total = 1932 * 1024
+	return wire.RobotEventBody{Name: "assets", Data: map[string]any{"list": string(list), "free": total - used, "total": total, "mounted": 1}}
 }
 
 func (r *robot) telemetry() map[string]float64 {
