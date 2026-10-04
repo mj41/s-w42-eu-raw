@@ -1130,7 +1130,13 @@ function makeCard(r) {
         textContent: "USB power is plugged in: rotate only if the cable is in the stand, not in the head." });
       const spin = (dir) => {
         if (!noCable.checked) { say("Tick “No cable in the head” first"); return; }
-        run("rotate", { velocity: dir * +speed.value, seconds: +secs.value, no_head_cable: true }, `rotate ${dir > 0 ? "right" : "left"}`);
+        const args = { velocity: dir * +speed.value, seconds: +secs.value, no_head_cable: true };
+        // The robot refuses while USB power is in, unless the person confirms the stand.
+        if ((c.robot?.telemetry?.core_vbus_v || 0) > 1) {
+          if (!confirm("USB power is plugged in. Only rotate if the cable is in the stand, not in the head's USB-C. Rotate?")) return;
+          args.usb_power_ok = true;
+        }
+        run("rotate", args, `rotate ${dir > 0 ? "right" : "left"}`);
       };
       sections.push(el("div", { className: "row", style: "margin-top:8px" }, [
         el("span", { className: "muted", textContent: "Rotate" }),
@@ -1327,7 +1333,7 @@ function makeCard(r) {
       c.renderEvents();
       return;
     }
-    if (/_(refused|failed)$/.test(ev.name) && Date.now() - Date.parse(ev.ts) < 10000) {
+    if (/_(refused|failed|stopped)$/.test(ev.name) && Date.now() - Date.parse(ev.ts) < 10000) {
       // e.g. rotate_refused: say it where the button was pressed, not only in Events
       status.textContent = ev.name.replaceAll("_", " ") + ((ev.data || {}).reason ? ": " + ev.data.reason : "");
     }
