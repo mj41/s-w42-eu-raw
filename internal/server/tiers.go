@@ -22,7 +22,7 @@ package server
 //	2       github:octocat          sponsor since 2026-10
 //	3       email:friend@example.com
 //
-// "email:" matches a provider-verified e-mail; "github:" a GitHub login and "github-id:" a
+// "email:" matches an e-mail verified by GitHub or Google (emailTrusted); "github:" a GitHub login and "github-id:" a
 // GitHub user id, both only from the GitHub connector of Dex (federated_claims).
 
 import (
@@ -134,7 +134,7 @@ func (s *Server) accountTier(a Account, now time.Time) int {
 	if s.tiers != nil {
 		rules := s.tiers.current(s, now)
 		keys := []string{}
-		if a.Email != "" {
+		if emailTrusted(a) {
 			keys = append(keys, "email:"+strings.ToLower(a.Email))
 		}
 		if a.Provider == "github" {

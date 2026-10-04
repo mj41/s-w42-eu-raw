@@ -63,6 +63,8 @@ func TestAccountTier(t *testing.T) {
 		{Account{Provider: "google", Login: "octocat"}, 4}, // a GitHub login only from GitHub
 		{Account{Email: "friend@example.com", Provider: "google"}, 3},
 		{Account{Email: "someone@example.com"}, 4},
+		{Account{Email: "admin@example.com", Provider: "microsoft"}, 4}, // a tenant admin can set any e-mail
+		{Account{Email: "friend@example.com", Provider: "microsoft"}, 4},
 	} {
 		if got := s.accountTier(c.a, now); got != c.want {
 			t.Errorf("%+v: tier %d, want %d", c.a, got, c.want)

@@ -125,7 +125,7 @@ stackchan-server -public-url https://chan.example \
   3       email:friend@example.com
   ```
 
-  `email:` is a provider-verified e-mail; `github:` (login) and `github-id:` (user id) match
+  `email:` (and `-admin-emails`) match only e-mails verified by GitHub or Google (not Microsoft: a tenant admin can set any e-mail there); `github:` (login) and `github-id:` (user id) match
   only through Dex's GitHub connector (scope `federated:id`). Without sign-in (a LAN server)
   everybody is tier 1.
 - Ids of robots that connected with the shared token belong to the owner and cannot be

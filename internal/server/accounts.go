@@ -151,7 +151,19 @@ func (s *Server) account(session string) (Account, bool) {
 }
 
 func (s *Server) isAdmin(a Account) bool {
-	return a.Email != "" && slices.ContainsFunc(s.cfg.AdminEmails, func(e string) bool { return strings.EqualFold(e, a.Email) })
+	return emailTrusted(a) && slices.ContainsFunc(s.cfg.AdminEmails, func(e string) bool { return strings.EqualFold(e, a.Email) })
+}
+
+// emailTrusted: the e-mail may grant something (admin, a tier). Through Dex only from
+// providers that verify it themselves: GitHub and Google. Microsoft's multi-tenant sign-in
+// lets any tenant's admin set a user's e-mail ("nOAuth"), so it does not count; neither does
+// any connector added later until it is checked and listed here.
+func emailTrusted(a Account) bool {
+	switch a.Provider {
+	case "", "github", "google": // "": not through Dex; email_verified was checked
+		return a.Email != ""
+	}
+	return false
 }
 
 // robotsPerAccount is how many robots an account may add: by its tier, tier 4 by
