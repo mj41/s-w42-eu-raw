@@ -33,17 +33,8 @@ type Auth struct {
 	OwnerName string `json:"owner_name"`
 	Public    bool   `json:"public"`
 	CacheS    int    `json:"cache_s"`
-	// The robot's app list as the owner set it on the manager, signed by the manager: the app
-	// relays it to the robot (wire.ManagedAppsBody); nil when the owner manages apps over USB only.
-	Managed *Managed `json:"managed,omitempty"`
 	// Pairings (Pairing.ID) the owner removed on the manager: the app unpairs those browsers.
 	Unpair []string `json:"unpair,omitempty"`
-}
-
-// Managed is a signed app list (wire.ManagedAppsBody).
-type Managed struct {
-	Payload string `json:"payload"`
-	Sig     string `json:"sig"`
 }
 
 type cachedAuth struct {
@@ -102,13 +93,11 @@ func (c *Client) Check(ctx context.Context, robot, token string) (Auth, error) {
 	return auth, nil
 }
 
-// Seen tells the manager the robot is connected to this app now, with what it reported (for the
-// owner's page: online, on which app, firmware, whether it has its latest app list), and returns
-// the manager's answer, fresh (the cache is updated). Apps call it after the robot registers and
-// every 15 s while it stays.
+// Seen tells the manager which browsers are paired with the robot on this app now, and returns
+// the manager's answer, fresh (the cache is updated): the pairings its owner removed there (Auth
+// Unpair). Apps call it after the robot registers and every 15 s while it stays. (The robot tells
+// its manager the rest itself, on its own channel.)
 type Seen struct {
-	Firmware     string `json:"firmware,omitempty"`
-	AppsVersions string `json:"apps_versions,omitempty"` // "<manager id>:<version>,…": the app lists the robot has
 	// The browsers paired with the robot on this app (never nil: [] is none), for the owner to
 	// see and remove on the manager.
 	Pairings []Pairing `json:"pairings"`
@@ -122,7 +111,7 @@ type Pairing struct {
 	LastSeen time.Time `json:"last_seen,omitzero"`
 	Watching bool      `json:"watching,omitempty"` // has the app open now
 	// The browser's id on the robot (end-to-end encryption, 16 hex): removing the pairing also
-	// makes the robot forget it (a signed app list with "forget").
+	// makes the robot forget it (a signed Forget from its manager).
 	E2E string `json:"e2e,omitempty"`
 }
 

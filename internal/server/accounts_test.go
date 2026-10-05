@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,7 +10,6 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -101,7 +99,6 @@ type fakeManager struct {
 type fakeManaged struct {
 	token, owner string
 	public       bool
-	managed      *robotauth.Managed // the signed app list the manager hands out
 }
 
 const managerSecret = "app-secret"
@@ -152,7 +149,7 @@ func newFakeManager(t *testing.T) *fakeManager {
 				m.pairings[req.Robot] = req.Seen.Pairings
 			}
 			json.NewEncoder(w).Encode(map[string]any{"ok": true, "owner": rb.owner, "owner_name": "x", "public": rb.public,
-				"managed": rb.managed, "unpair": m.unpair})
+				"unpair": m.unpair})
 		case "/api/sso/token":
 			a, ok := m.codes[req.Code]
 			delete(m.codes, req.Code)
@@ -348,29 +345,6 @@ func TestRobotURL(t *testing.T) {
 	}
 }
 
-// The robot's app list from the manager (signed there; the robot checks it) is relayed to the
-// robot when it connects; robots without one get none.
-func TestManagedAppsRelayed(t *testing.T) {
-	ts, _, m := newManagedServer(t, newFakeManager(t), "")
-	payload := base64.StdEncoding.EncodeToString([]byte(`{"robot":"stackchan-0a1b2c3d4e51","version":3}`))
-	m.set("stackchan-0a1b2c3d4e50", "tok-0", "o", false)
-	m.set("stackchan-0a1b2c3d4e51", "tok-1", "o", false)
-	m.mu.Lock()
-	rb := m.robots["stackchan-0a1b2c3d4e51"]
-	rb.managed = &robotauth.Managed{Payload: payload, Sig: "c2ln"}
-	m.robots["stackchan-0a1b2c3d4e51"] = rb
-	m.mu.Unlock()
-	if kinds := registerGuest(t, ts, "tok-0", "stackchan-0a1b2c3d4e50"); slices.Contains(kinds, wire.KindManagedApps) {
-		t.Errorf("no list from the manager, one relayed: %v", kinds)
-	}
-	if kinds := registerGuest(t, ts, "tok-1", "stackchan-0a1b2c3d4e51"); !slices.Contains(kinds, wire.KindManagedApps) {
-		t.Errorf("the manager's list not relayed: %v", kinds)
-	}
-	if v := managedVersion(payload); v != 3 {
-		t.Errorf("version %d", v)
-	}
-}
-
 // The app tells the manager who is paired with a robot (device, since, end-to-end id) and drops
 // the pairings the owner removed there.
 func TestPairingsReportedAndRemoved(t *testing.T) {
@@ -387,7 +361,7 @@ func TestPairingsReportedAndRemoved(t *testing.T) {
 	s.mu.Unlock()
 	s.noteE2E(b, wire.KindE2EHello, json.RawMessage(`{"b":"0011223344556677"}`))
 	c := &robotConn{id: robot, mgrToken: "tok-0"}
-	s.relayManaged(context.Background(), c)
+	s.reportSeen(context.Background(), c)
 	m.mu.Lock()
 	got := m.pairings[robot]
 	m.mu.Unlock()
@@ -408,7 +382,7 @@ func TestPairingsReportedAndRemoved(t *testing.T) {
 	m.mu.Lock()
 	m.unpair = []string{pairingID(b)}
 	m.mu.Unlock()
-	s.relayManaged(context.Background(), c)
+	s.reportSeen(context.Background(), c)
 	s.mu.Lock()
 	left := s.sessions[a][robot] && !s.sessions[b][robot]
 	s.mu.Unlock()

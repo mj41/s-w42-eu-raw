@@ -1,12 +1,10 @@
 package server
 
 import (
-	"context"
 	"net/http"
 	"regexp"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -44,10 +42,7 @@ type robotConn struct {
 	send   chan outMsg
 	limits *guestLimits // invited robots only; nil for the owner's robots
 
-	mgrToken     string       // a token from the manager: asked about again every minute (managed.go)
-	managedSent  int32        // the version of the signed app list relayed last
-	firmware     string       // from Register, for the manager (owner's page)
-	appsVersions atomic.Value // string: its app lists' versions per manager (label apps_ver, then AppsVersion)
+	mgrToken string // a token from the manager: its paired browsers go there (manager.go)
 
 	closeOnce sync.Once
 	done      chan struct{}
@@ -136,8 +131,6 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	c.firmware = reg.Capabilities.Firmware
-	c.appsVersions.Store(reg.Labels["apps_ver"])
 	s.attach(c, reg)
 	defer s.detach(c)
 	s.log.Info("robot connected", "robot", id, "model", reg.Capabilities.Model,
@@ -147,7 +140,7 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 	if f, err := wire.Marshal(wire.KindAccepted, wire.Meta{WorkerID: id, SessionID: newCode()}, nil); err == nil {
 		c.enqueue(f)
 	}
-	s.relayManaged(r.Context(), c)
+	s.reportSeen(r.Context(), c)
 	s.sendPairCode(c)
 	// Browsers paired before (pairings survive restarts): tell the robot right away, so
 	// it starts with its face instead of the QR screen.
@@ -282,12 +275,6 @@ func (s *Server) handleRobotFrame(c *robotConn, f wire.Frame) {
 		}
 		s.log.Info("robot event", "robot", c.id, "name", body.Name)
 		s.robotEvent(c.id, body)
-	case wire.KindAppsVersion:
-		var body wire.AppsVersionBody
-		if f.Decode(&body) == nil && body.Versions != "" {
-			c.appsVersions.Store(body.Versions)
-			go s.relayManaged(context.Background(), c) // the manager learns at once
-		}
 	case wire.KindRobotPong:
 		var body wire.RobotPongBody
 		if err := f.Decode(&body); err != nil {

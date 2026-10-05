@@ -42,8 +42,6 @@ const (
 	KindPairCode     = "PairCode"
 	KindPaired       = "Paired"
 	KindRobotCommand = "RobotCommand"
-	KindManagedApps  = "ManagedApps"
-	KindAppsVersion  = "AppsVersion"
 
 	// End-to-end encrypted (home-w42-eu docs/e2ee.md; package e2e). The server only relays
 	// them: browser -> robot E2EEnroll, E2EHello, E2ECommand; robot -> browsers E2EGroupKey,
@@ -65,20 +63,6 @@ type E2EEnrollBody struct {
 // E2EHelloBody: a returning browser asks for the current group key.
 type E2EHelloBody struct {
 	B string `json:"b"` // browser id
-}
-
-// ManagedAppsBody is the robot's app list as its Stackchan manager set it, signed by the manager
-// (the robot has its key from the USB setup and checks it): the server only relays it.
-type ManagedAppsBody struct {
-	Payload string `json:"payload"` // base64 of the JSON list
-	Sig     string `json:"sig"`     // base64, ECDSA P-256 over SHA-256 of the payload
-}
-
-// AppsVersionBody: robot -> server, the versions of the app lists it has now, one per manager
-// ("<manager id>:<version>,…", after a ManagedApps; never sealed: for the managers, who know the
-// lists anyway). The same string is its Register label "apps_ver".
-type AppsVersionBody struct {
-	Versions string `json:"versions"`
 }
 
 // ClassRobot is the only worker class this server accepts.

@@ -130,7 +130,7 @@ func main() {
 	defer stop()
 	go srv.RunStateSaver(ctx)
 	go srv.RunSignInCheck(ctx)
-	go srv.RunManagedRelay(ctx)
+	go srv.RunSeenReports(ctx)
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

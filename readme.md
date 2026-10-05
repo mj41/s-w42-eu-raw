@@ -83,9 +83,8 @@ A robot set up by a [Stackchan manager](https://github.com/mj41/s-w42-eu-manager
 of its own for this app. This server asks the manager about it when the robot connects
 (`POST <manager>/api/robot-auth`, with this app's secret) and learns whose robot it is and
 whether it is public; it keeps no robot tokens itself. Every 15 s while the robot stays, it
-tells the manager the robot's firmware, app list versions and the browsers paired with it
-(device, since, last seen, watching now, end-to-end id; not their sessions), and drops the
-pairings the owner removed there. With sign-in through the manager
+tells the manager the browsers paired with it (device, since, last seen, watching now,
+end-to-end id; not their sessions), and drops the pairings the owner removed there. With sign-in through the manager
 (`-manager-sign-in`: one sign-in for all its apps) owners use their robots here:
 
 ```bash
@@ -104,11 +103,9 @@ s-w42-eu-raw -public-url https://raw.example \
   unpairs everybody else. Anonymous browsers cannot send "Ask a paired phone" requests.
 - The manager's answers are cached for a minute; when the manager cannot be reached, a robot
   it confirmed within the last hour may still connect. A refusal is never cached.
-- **Apps changed on the manager.** When the owner allowed it at the USB setup, the manager's
-  answer carries the robot's app list, signed by the manager (ECDSA P-256); this server relays it
-  to the robot (`ManagedApps`) when the robot connects and when its version changes (checked every
-  minute). The robot checks the signature with the manager's key from its setup; a server cannot
-  change it.
+- **The robot's apps are its manager's business.** The robot keeps its own connection to its
+  manager (home-w42-eu docs/manager-channel.md): app lists, switches and the rest go there, signed;
+  this server only carries the robot's traffic for this app.
 - Other apps check robot tokens the same way with the package
   [`robotauth`](robotauth/robotauth.go) (`github.com/mj41/s-w42-eu-raw/robotauth`), e.g. the pet.
 - Without sign-in configured (a LAN server), every robot is public.
