@@ -36,6 +36,8 @@ type Auth struct {
 	// The robot's app list as the owner set it on the manager, signed by the manager: the app
 	// relays it to the robot (wire.ManagedAppsBody); nil when the owner manages apps over USB only.
 	Managed *Managed `json:"managed,omitempty"`
+	// Pairings (Pairing.ID) the owner removed on the manager: the app unpairs those browsers.
+	Unpair []string `json:"unpair,omitempty"`
 }
 
 // Managed is a signed app list (wire.ManagedAppsBody).
@@ -107,9 +109,27 @@ func (c *Client) Check(ctx context.Context, robot, token string) (Auth, error) {
 type Seen struct {
 	Firmware     string `json:"firmware,omitempty"`
 	AppsVersions string `json:"apps_versions,omitempty"` // "<manager id>:<version>,…": the app lists the robot has
+	// The browsers paired with the robot on this app (never nil: [] is none), for the owner to
+	// see and remove on the manager.
+	Pairings []Pairing `json:"pairings"`
+}
+
+// Pairing is one browser paired with a robot on an app.
+type Pairing struct {
+	ID       string    `json:"id"`               // the app's id for it: stable, not a secret
+	Device   string    `json:"device,omitempty"` // e.g. "Chrome on Android"
+	Paired   time.Time `json:"paired,omitzero"`  // zero: before apps told
+	LastSeen time.Time `json:"last_seen,omitzero"`
+	Watching bool      `json:"watching,omitempty"` // has the app open now
+	// The browser's id on the robot (end-to-end encryption, 16 hex): removing the pairing also
+	// makes the robot forget it (a signed app list with "forget").
+	E2E string `json:"e2e,omitempty"`
 }
 
 func (c *Client) Seen(ctx context.Context, robot, token string, seen Seen) (Auth, error) {
+	if seen.Pairings == nil {
+		seen.Pairings = []Pairing{}
+	}
 	auth, err := c.askWith(ctx, robot, token, &seen)
 	if err != nil {
 		return c.Check(ctx, robot, token) // the cached answer, or the grace for a confirmed robot
@@ -152,7 +172,7 @@ func (c *Client) askWith(ctx context.Context, robot, token string, seen *Seen) (
 		return Auth{}, fmt.Errorf("manager: %s", resp.Status)
 	}
 	var auth Auth
-	if err := json.NewDecoder(http.MaxBytesReader(nil, resp.Body, 4<<10)).Decode(&auth); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(nil, resp.Body, 64<<10)).Decode(&auth); err != nil {
 		return Auth{}, fmt.Errorf("manager: %w", err)
 	}
 	return auth, nil

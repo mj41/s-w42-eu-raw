@@ -33,8 +33,8 @@ func (s *Server) managedRobotLocked(id string, auth robotauth.Auth) {
 	s.requestSave()
 }
 
-// relayManaged tells the manager the robot is here (Seen: online, firmware, its app list version)
-// and passes the robot's app list, as its owner set it on the manager and the manager
+// relayManaged tells the manager the robot is here (Seen: online, firmware, its app list version,
+// the browsers paired with it), drops the pairings the owner removed there, and passes the robot's app list, as its owner set it on the manager and the manager
 // signed it, on to the robot (it checks the signature itself). Sent when the robot connects and
 // when the version changes (RunManagedRelay); the manager's answers are cached for a minute.
 func (s *Server) relayManaged(ctx context.Context, c *robotConn) {
@@ -42,8 +42,13 @@ func (s *Server) relayManaged(ctx context.Context, c *robotConn) {
 		return
 	}
 	versions, _ := c.appsVersions.Load().(string)
-	auth, err := s.manager.Seen(ctx, c.id, c.mgrToken, robotauth.Seen{Firmware: c.firmware, AppsVersions: versions})
-	if err != nil || !auth.OK || auth.Managed == nil {
+	auth, err := s.manager.Seen(ctx, c.id, c.mgrToken,
+		robotauth.Seen{Firmware: c.firmware, AppsVersions: versions, Pairings: s.pairings(c.id)})
+	if err != nil || !auth.OK {
+		return
+	}
+	s.unpair(c.id, auth.Unpair)
+	if auth.Managed == nil {
 		return
 	}
 	version := managedVersion(auth.Managed.Payload)

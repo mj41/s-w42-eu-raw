@@ -83,11 +83,13 @@ type Server struct {
 	pairFails   *failLimiter               // wrong pairing codes per address
 	sessions    map[string]map[string]bool // browser session id -> paired robot ids
 	seenMu      sync.Mutex
-	sessionSeen map[string]time.Time     // browser session id -> its last request: pairings unused for pairingTTL go
-	subs        map[*subscriber]struct{} // open SSE streams
-	pings       map[string]pendingPing   // "robot/ping id" -> in-flight ping
-	media       map[*mediaSub]struct{}   // browser media sockets
-	joins       map[string]*joinRequest  // pending join requests by id (join.go)
+	sessionSeen map[string]time.Time            // browser session id -> its last request: pairings unused for pairingTTL go
+	sessionMeta map[string]sessionMeta          // browser session id -> its device and e2e id (pairings.go); seenMu
+	pairedSince map[string]map[string]time.Time // browser session id -> robot id -> paired at (s.mu)
+	subs        map[*subscriber]struct{}        // open SSE streams
+	pings       map[string]pendingPing          // "robot/ping id" -> in-flight ping
+	media       map[*mediaSub]struct{}          // browser media sockets
+	joins       map[string]*joinRequest         // pending join requests by id (join.go)
 	// last join request per client IP, for rate limiting
 	joinLastByIP map[string]time.Time
 
@@ -167,6 +169,8 @@ func New(cfg Config) *Server {
 		sessions: map[string]map[string]bool{},
 
 		sessionSeen: map[string]time.Time{},
+		sessionMeta: map[string]sessionMeta{},
+		pairedSince: map[string]map[string]time.Time{},
 		subs:        map[*subscriber]struct{}{},
 		pings:       map[string]pendingPing{},
 		media:       map[*mediaSub]struct{}{},
@@ -516,11 +520,7 @@ func (s *Server) redeem(session, code string) (robotID string, viewers int, conn
 		return "", 0, nil, false
 	}
 	delete(s.codes, code)
-	if s.sessions[session] == nil {
-		s.sessions[session] = map[string]bool{}
-	}
-	s.sessions[session][pc.robotID] = true
-	s.requestSave()
+	s.pairLocked(session, pc.robotID)
 	for _, paired := range s.sessions {
 		if paired[pc.robotID] {
 			viewers++
@@ -544,6 +544,10 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) string {
 	if c, err := r.Cookie(sessionCookie); err == nil && validSessionID(c.Value) {
 		s.seenMu.Lock()
 		s.sessionSeen[c.Value] = time.Now().UTC().Truncate(time.Hour) // hours are enough for pairingTTL
+		if m := s.sessionMeta[c.Value]; m.Device == "" {
+			m.Device = agentSummary(r.UserAgent())
+			s.sessionMeta[c.Value] = m
+		}
 		s.seenMu.Unlock()
 		return c.Value
 	}

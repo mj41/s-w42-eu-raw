@@ -82,7 +82,10 @@ go run ./cmd/fake-robot                    # simulated robot, in a second termin
 A robot set up by a [Stackchan manager](https://github.com/mj41/s-w42-eu-manager) has a token
 of its own for this app. This server asks the manager about it when the robot connects
 (`POST <manager>/api/robot-auth`, with this app's secret) and learns whose robot it is and
-whether it is public; it keeps no robot tokens itself. With sign-in through the manager
+whether it is public; it keeps no robot tokens itself. Every minute while the robot stays, it
+tells the manager the robot's firmware, app list versions and the browsers paired with it
+(device, since, last seen, watching now, end-to-end id; not their sessions), and drops the
+pairings the owner removed there. With sign-in through the manager
 (`-manager-sign-in`: one sign-in for all its apps) owners use their robots here:
 
 ```bash

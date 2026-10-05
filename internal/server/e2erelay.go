@@ -56,6 +56,7 @@ func (s *Server) handleE2EToRobot(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "robot is offline", http.StatusConflict)
 		return
 	}
+	s.noteE2E(session, req.Kind, req.Body)
 	f, err := wire.Marshal(req.Kind, wire.Meta{WorkerID: id}, req.Body)
 	if err != nil || !conn.enqueue(f) {
 		http.Error(w, "robot busy, try again", http.StatusServiceUnavailable)

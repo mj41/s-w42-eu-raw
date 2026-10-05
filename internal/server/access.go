@@ -33,15 +33,7 @@ func (s *Server) ownsLocked(a Account, robotID string) bool {
 // pairOwnedLocked pairs a signed-in session with the robots its account owns, so owners
 // need no code on their own devices. Must hold s.mu.
 func (s *Server) pairOwnedLocked(session string, a Account) {
-	add := func(id string) {
-		if s.sessions[session] == nil {
-			s.sessions[session] = map[string]bool{}
-		}
-		if !s.sessions[session][id] {
-			s.sessions[session][id] = true
-			s.requestSave()
-		}
-	}
+	add := func(id string) { s.pairLocked(session, id) }
 	for id, inv := range s.owned {
 		if inv.Owner == a.Key {
 			add(id)
@@ -62,6 +54,7 @@ func (s *Server) unpairOthersLocked(robotID string) (dropped int) {
 	for session, paired := range s.sessions {
 		if paired[robotID] && !s.mayPairLocked(session, robotID) {
 			delete(paired, robotID)
+			delete(s.pairedSince[session], robotID)
 			dropped++
 		}
 	}

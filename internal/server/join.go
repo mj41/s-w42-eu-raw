@@ -109,13 +109,10 @@ func (s *Server) handleJoinDecision(w http.ResponseWriter, r *http.Request) {
 	status := "denied"
 	if decision == "approve" {
 		status = "approved"
-		if s.sessions[j.session] == nil {
-			s.sessions[j.session] = map[string]bool{}
-		}
 		shared := robots[:0:0]
 		for _, id := range robots {
 			if s.mayPairLocked(j.session, id) { // private robots only to their owner
-				s.sessions[j.session][id] = true
+				s.pairLocked(j.session, id)
 				shared = append(shared, id)
 			}
 		}

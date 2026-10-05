@@ -109,6 +109,14 @@ const E2E = (() => {
     body: JSON.stringify({ kind, body }),
   }).then(async (res) => { if (!res.ok) throw new Error((await res.text()).trim() || res.statusText); });
 
+  // Data under an epoch we have no key for: the robot started anew or forgot a browser. Ask for
+  // the current group key (at most every 10 s); a forgotten browser gets no answer.
+  const newEpoch = async (id, r, epoch) => {
+    if (!r.k || epoch < Math.max(0, ...r.groups.keys()) || Date.now() - (r.helloAt || 0) < 10000) return;
+    r.helloAt = Date.now();
+    try { await post(id, "E2EHello", { b: (await me()).id }); } catch {}
+  };
+
   let pending = null; // { id, rPub, p } from the QR code's fragment, until enrolled
 
   return {
@@ -164,7 +172,7 @@ const E2E = (() => {
       }
       if (ev.kind === "E2EData") {
         const g = r.groups.get(b.epoch);
-        if (!g) return null;
+        if (!g) { newEpoch(ev.robot, r, b.epoch); return null; }
         const f = JSON.parse(td.decode(await open(g, b64u.dec(b.n), b64u.dec(b.c), te.encode(ev.robot))));
         if (f.kind === "RobotTelemetry" && f.body.measurements) Object.assign(r.telemetry, f.body.measurements);
         return f;
@@ -178,7 +186,7 @@ const E2E = (() => {
       if (!r || u8.length < 33) return null;
       const epoch = new DataView(u8.buffer, u8.byteOffset).getUint32(1);
       const g = r.groups.get(epoch);
-      if (!g) return null;
+      if (!g) { newEpoch(robotId, r, epoch); return null; }
       try { return await open(g, u8.subarray(5, 17), u8.subarray(17), te.encode(robotId)); } catch { return null; }
     },
 

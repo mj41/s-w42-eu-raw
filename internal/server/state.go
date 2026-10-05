@@ -30,10 +30,12 @@ const (
 )
 
 type stateFile struct {
-	Version  int                  `json:"version"`
-	Sessions map[string][]string  `json:"sessions"`                // browser session id -> paired robot ids
-	Seen     map[string]time.Time `json:"sessions_seen,omitempty"` // their last request (pairingTTL)
-	Robots   []robotRecord        `json:"robots"`
+	Version  int                             `json:"version"`
+	Sessions map[string][]string             `json:"sessions"`                // browser session id -> paired robot ids
+	Seen     map[string]time.Time            `json:"sessions_seen,omitempty"` // their last request (pairingTTL)
+	Meta     map[string]sessionMeta          `json:"sessions_meta,omitempty"` // their device and e2e id
+	Since    map[string]map[string]time.Time `json:"paired_since,omitempty"`  // session -> robot -> paired at
+	Robots   []robotRecord                   `json:"robots"`
 
 	Logins      map[string]Account `json:"logins,omitempty"`        // browser session id -> signed-in account
 	Handles     map[string]string  `json:"sso_handles,omitempty"`   // browser session id -> its sign-in's handle at the manager
@@ -88,7 +90,13 @@ func (s *Server) loadState() error {
 		}
 		s.seenMu.Lock()
 		s.sessionSeen[session] = seen
+		if m, ok := st.Meta[session]; ok {
+			s.sessionMeta[session] = m
+		}
 		s.seenMu.Unlock()
+		if since := st.Since[session]; len(since) > 0 {
+			s.pairedSince[session] = since
+		}
 	}
 	for _, r := range st.Robots {
 		rs := &robotState{
@@ -133,19 +141,33 @@ func (s *Server) loadState() error {
 }
 
 func (s *Server) snapshot() ([]byte, error) {
-	st := stateFile{Version: stateVersion, Sessions: map[string][]string{}, Seen: map[string]time.Time{}}
+	st := stateFile{Version: stateVersion, Sessions: map[string][]string{}, Seen: map[string]time.Time{},
+		Meta: map[string]sessionMeta{}, Since: map[string]map[string]time.Time{}}
 	s.seenMu.Lock()
 	seen := maps.Clone(s.sessionSeen)
+	meta := maps.Clone(s.sessionMeta)
 	s.seenMu.Unlock()
 	s.mu.Lock()
 	for session := range s.sessions { // pairings of browsers not seen for pairingTTL go
 		if t, ok := seen[session]; ok && time.Since(t) > pairingTTL {
 			delete(s.sessions, session)
+			delete(s.pairedSince, session)
 		}
 	}
 	for session, paired := range s.sessions {
 		if t, ok := seen[session]; ok {
 			st.Seen[session] = t
+		}
+		if m, ok := meta[session]; ok && len(paired) > 0 {
+			st.Meta[session] = m
+		}
+		for id, t := range s.pairedSince[session] {
+			if paired[id] {
+				if st.Since[session] == nil {
+					st.Since[session] = map[string]time.Time{}
+				}
+				st.Since[session][id] = t
+			}
 		}
 		for id, ok := range paired {
 			if ok {

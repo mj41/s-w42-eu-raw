@@ -89,6 +89,9 @@ type fakeManager struct {
 	robots map[string]fakeManaged // robot id -> its token for this app and owner
 	asked  int
 
+	pairings map[string][]robotauth.Pairing // robot id -> what the app last reported
+	unpair   []string                       // the answer's Unpair
+
 	next    *sso.Account           // the next browser to come signs in as (nil: nobody)
 	codes   map[string]sso.Account // one-time codes
 	handles map[string]sso.Account // handles of sign-ins that are on
@@ -127,7 +130,10 @@ func newFakeManager(t *testing.T) *fakeManager {
 			http.Error(w, "unknown app", http.StatusUnauthorized)
 			return
 		}
-		var req struct{ Robot, Token, Code, Handle string }
+		var req struct {
+			Robot, Token, Code, Handle string
+			Seen                       *robotauth.Seen
+		}
 		json.NewDecoder(r.Body).Decode(&req)
 		m.mu.Lock()
 		defer m.mu.Unlock()
@@ -139,7 +145,14 @@ func newFakeManager(t *testing.T) *fakeManager {
 				json.NewEncoder(w).Encode(map[string]any{"ok": false})
 				return
 			}
-			json.NewEncoder(w).Encode(map[string]any{"ok": true, "owner": rb.owner, "owner_name": "x", "public": rb.public, "managed": rb.managed})
+			if req.Seen != nil {
+				if m.pairings == nil {
+					m.pairings = map[string][]robotauth.Pairing{}
+				}
+				m.pairings[req.Robot] = req.Seen.Pairings
+			}
+			json.NewEncoder(w).Encode(map[string]any{"ok": true, "owner": rb.owner, "owner_name": "x", "public": rb.public,
+				"managed": rb.managed, "unpair": m.unpair})
 		case "/api/sso/token":
 			a, ok := m.codes[req.Code]
 			delete(m.codes, req.Code)
@@ -355,5 +368,54 @@ func TestManagedAppsRelayed(t *testing.T) {
 	}
 	if v := managedVersion(payload); v != 3 {
 		t.Errorf("version %d", v)
+	}
+}
+
+// The app tells the manager who is paired with a robot (device, since, end-to-end id) and drops
+// the pairings the owner removed there.
+func TestPairingsReportedAndRemoved(t *testing.T) {
+	_, s, m := newManagedServer(t, newFakeManager(t), "")
+	const robot = "stackchan-0a1b2c3d4e50"
+	m.set(robot, "tok-0", "o", false)
+	a, b := strings.Repeat("a", 64), strings.Repeat("b", 64)
+	s.seenMu.Lock()
+	s.sessionMeta[a] = sessionMeta{Device: "Chrome on Android"}
+	s.seenMu.Unlock()
+	s.mu.Lock()
+	s.pairLocked(a, robot)
+	s.pairLocked(b, robot)
+	s.mu.Unlock()
+	s.noteE2E(b, wire.KindE2EHello, json.RawMessage(`{"b":"0011223344556677"}`))
+	c := &robotConn{id: robot, mgrToken: "tok-0"}
+	s.relayManaged(context.Background(), c)
+	m.mu.Lock()
+	got := m.pairings[robot]
+	m.mu.Unlock()
+	if len(got) != 2 {
+		t.Fatalf("reported %+v", got)
+	}
+	byID := map[string]robotauth.Pairing{}
+	for _, p := range got {
+		byID[p.ID] = p
+	}
+	pa, pb := byID[pairingID(a)], byID[pairingID(b)]
+	if pa.Device != "Chrome on Android" || pa.Paired.IsZero() || pb.E2E != "0011223344556677" || pa.E2E != "" {
+		t.Errorf("a %+v, b %+v", pa, pb)
+	}
+	if strings.Contains(fmt.Sprint(got), a) {
+		t.Error("a session id reported")
+	}
+	m.mu.Lock()
+	m.unpair = []string{pairingID(b)}
+	m.mu.Unlock()
+	s.relayManaged(context.Background(), c)
+	s.mu.Lock()
+	left := s.sessions[a][robot] && !s.sessions[b][robot]
+	s.mu.Unlock()
+	if !left {
+		t.Error("b not unpaired, or a too")
+	}
+	if p := s.pairings(robot); len(p) != 1 || p[0].ID != pairingID(a) {
+		t.Errorf("after: %+v", p)
 	}
 }
