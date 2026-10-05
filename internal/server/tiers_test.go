@@ -47,7 +47,7 @@ func tierServer(t *testing.T, tiers string) *Server {
 		t.Fatal(err)
 	}
 	return New(Config{RobotToken: testToken, PairTTL: time.Minute, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		OIDCIssuer: "https://auth.example", OIDCClientID: "test", PublicURL: "https://chan.example",
+		ManagerURL: "https://sm.example", ManagerSecret: "x", ManagerSignIn: true, PublicURL: "https://chan.example",
 		AdminEmails: []string{"admin@example.com"}, TiersFile: path, SponsorURL: "https://example.com/sponsor"})
 }
 

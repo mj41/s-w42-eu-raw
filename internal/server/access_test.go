@@ -27,7 +27,7 @@ func robotWithCode(t *testing.T, ts *httptest.Server, token, id string) (*testRo
 }
 
 func (u *user) pair(code string) int {
-	resp, err := u.c.Get(u.server + "/pair?code=" + code)
+	resp, err := u.c.Get(u.server + "/pair?signin=no&code=" + code) // no silent sign-in (TestSilentSignIn)
 	if err != nil {
 		u.t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func (u *user) pairedIDs() string {
 }
 
 func TestPrivateRobotOnlyForItsOwner(t *testing.T) {
-	f := newFakeIssuer(t)
+	f := newFakeManager(t)
 	ts, _, m := newManagedServer(t, f, "")
 	ema, jan, anon := newUser(t, ts.URL), newUser(t, ts.URL), newUser(t, ts.URL)
 	ema.signIn(f, "ema", "ema@example.com", "Ema")
@@ -91,7 +91,7 @@ func TestPrivateRobotOnlyForItsOwner(t *testing.T) {
 }
 
 func TestServerRobotsBelongToAdmins(t *testing.T) {
-	f := newFakeIssuer(t)
+	f := newFakeManager(t)
 	ts, _ := newSignInServer(t, f, "")
 	_, code := robotWithCode(t, ts, testToken, "stackchan-owner00001")
 	anon := newUser(t, ts.URL)
@@ -106,7 +106,7 @@ func TestServerRobotsBelongToAdmins(t *testing.T) {
 }
 
 func TestAnonymousCannotAskToJoin(t *testing.T) {
-	f := newFakeIssuer(t)
+	f := newFakeManager(t)
 	ts, _ := newSignInServer(t, f, "")
 	anon := newUser(t, ts.URL)
 	if code, _ := anon.do("POST", "/api/join", "", true); code != http.StatusUnauthorized {

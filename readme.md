@@ -83,14 +83,13 @@ go run ./cmd/fake-robot                    # simulated robot, in a second termin
 A robot set up by a [Stackchan manager](https://github.com/mj41/s-w42-eu-manager) has a token
 of its own for this app. This server asks the manager about it when the robot connects
 (`POST <manager>/api/robot-auth`, with this app's secret) and learns whose robot it is and
-whether it is public; it keeps no robot tokens itself. With sign-in (an OpenID Connect provider,
-on w42.eu Dex at `https://auth.w42.eu`) owners use their robots here:
+whether it is public; it keeps no robot tokens itself. With sign-in through the manager
+(`-manager-sign-in`: one sign-in for all its apps) owners use their robots here:
 
 ```bash
 s-w42-eu-raw -public-url https://raw.example \
   -manager-url https://manager.example -manager-secret-file /secrets/manager \
-  -oidc-issuer https://auth.example -oidc-client-id raw -oidc-client-secret-file /secrets/oidc \
-  -admin-emails you@example.com -state-file /state/state.json \
+  -manager-sign-in -admin-emails you@example.com -state-file /state/state.json \
   -tiers-file /config/tiers -sponsor-url https://github.com/sponsors/you
 ```
 
@@ -134,8 +133,16 @@ s-w42-eu-raw -public-url https://raw.example \
   everybody is tier 1.
 - Robots that connect with the shared token (`-token-file`) are this server's own: they belong
   to the admins.
-- The login uses the authorization code flow with PKCE, a nonce and a one-time state bound
-  to the browser session; changing requests must come from this server's origin.
+- **One sign-in for all apps.** "Sign in" goes to the manager (`GET <manager>/sso`), which
+  signs the person in once (GitHub or Google through Dex) and sends them back with a one-time
+  code; this server trades it for the account (`POST <manager>/api/sso/token`, with this app's
+  secret). A page load tries that silently every 10 minutes at most, so someone signed in on
+  the manager or another app is signed in here without a click, and anyone else just uses the
+  page. Every minute this server asks the manager whether each sign-in is still on: signing out
+  on the manager or in any app signs out here too, and signing out here signs out everywhere.
+  The browser's cookie for the manager never comes here; this server keeps a session of its
+  own. The package [`sso`](sso/sso.go) does it for any app (the pet uses it too).
+- Changing requests must come from this server's origin.
 - Sign-ins live in the state file (`-state-file`), so it must be on persistent storage.
 
 ### Other people's robots: invite tokens (without sign-in)
@@ -313,7 +320,7 @@ this server's origin.
 | `GET /pair?code=…` | QR target; adds the robot to this browser's session |
 | `GET /api/info` | about this server: `https_url` when it has an HTTPS listener (`-tls-listen`) |
 | `GET /api/me` | sign-in state, tier and its hint, whether 640×480 video is allowed, the manager's URL; signed in also the account |
-| `GET /auth/login`, `GET /auth/callback`, `POST /auth/logout` | sign-in with the OpenID Connect provider (only with `-oidc-issuer`) |
+| `GET /auth/login`, `GET /auth/sso`, `POST /auth/logout` | sign-in through the manager (only with `-manager-sign-in`); logout signs out of every app |
 | `POST /api/join` | an unpaired browser asks paired browsers for access; returns `{"id", "code", "from", "agent", "expires"}`. Paired browsers get a `join_request` SSE event (also replayed when they connect) |
 | `POST /api/join/{id}/approve`, `…/deny` | a paired browser answers; approve pairs the requester with the approver's robots. The requester gets `join_result` `{"status"}`, the other paired browsers `join_closed` |
 | `GET /api/robots` | paired robots (JSON) |

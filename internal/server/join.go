@@ -39,7 +39,7 @@ func (s *Server) handleJoinRequest(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, signedIn := s.logins[session]; s.oidc != nil && !signedIn {
+	if _, signedIn := s.logins[session]; s.sso != nil && !signedIn {
 		http.Error(w, "sign in first", http.StatusUnauthorized) // anonymous browsers do not bother anyone
 		return
 	}

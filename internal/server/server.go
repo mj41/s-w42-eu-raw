@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/mj41/s-w42-eu-raw/robotauth"
+	"github.com/mj41/s-w42-eu-raw/sso"
 	"github.com/mj41/s-w42-eu-raw/wire"
 )
 
@@ -40,15 +41,12 @@ type Config struct {
 	ManagerURL    string // e.g. https://sm.w42.eu; "" = no manager
 	ManagerSecret string // this app's secret at the manager
 
-	// Sign-in (OpenID Connect, e.g. Dex at auth.w42.eu), so owners can use their private robots
-	// (accounts.go). OIDCIssuer and OIDCClientID empty: no sign-in.
-	OIDCIssuer       string
-	OIDCClientID     string
-	OIDCClientSecret string
-	OIDCRedirectURL  string   // default PublicURL + /auth/callback
-	AdminEmails      []string // verified e-mails of the owners of this server's own robots (shared token)
-	TiersFile        string   // tiers 1-3 by e-mail or GitHub login (tiers.go); empty: only admins are tier 1
-	SponsorURL       string   // where tier 4 is pointed when a limit is hit
+	// Sign-in through the manager (accounts.go, package sso), so owners can use their private
+	// robots: needs ManagerURL and ManagerSecret. Off: no sign-in, every robot is public.
+	ManagerSignIn bool
+	AdminEmails   []string // verified e-mails of the owners of this server's own robots (shared token)
+	TiersFile     string   // tiers 1-3 by e-mail or GitHub login (tiers.go); empty: only admins are tier 1
+	SponsorURL    string   // where tier 4 is pointed when a limit is hit
 
 	PublicURL string               // base URL browsers use, e.g. http://192.168.1.10:8765
 	PairTTL   time.Duration        // lifetime of a pairing code
@@ -71,8 +69,9 @@ type Server struct {
 	invites *robotInvites          // per-robot invite tokens (nil: none)
 	manager *robotauth.Client      // nil: no manager
 
-	oidc        *oidcLogin             // nil: no sign-in
+	sso         *sso.Client            // nil: no sign-in (accounts.go)
 	logins      map[string]Account     // browser session id -> signed-in account
+	handles     map[string]string      // browser session id -> its sign-in's handle at the manager
 	owned       map[string]ownedInvite // robot id -> invite added by an account
 	ownerRobots map[string]bool        // robot ids seen with the shared token: never claimable
 	public      map[string]bool        // robots anyone may pair with by code (access.go); the rest are private
@@ -174,16 +173,19 @@ func New(cfg Config) *Server {
 		joinLastByIP: map[string]time.Time{},
 		robotFails:   newFailLimiter(maxRobotAuthFails, failWindow, cfg.NoAddressLimits),
 		pairFails:    newFailLimiter(maxPairFails, failWindow, cfg.NoAddressLimits),
-		oidc:         newOIDCLogin(cfg),
 		streams:      newStreamLimiter(),
 		cmdBuckets:   map[string]*bucket{},
 		tiers:        newTierRules(cfg.TiersFile),
 		logins:       map[string]Account{},
+		handles:      map[string]string{},
 		owned:        map[string]ownedInvite{},
 		ownerRobots:  map[string]bool{},
 		public:       map[string]bool{},
 	}
 	s.manager = robotauth.New(cfg.ManagerURL, cfg.ManagerSecret)
+	if cfg.ManagerSignIn {
+		s.sso = sso.New(cfg.ManagerURL, cfg.ManagerSecret)
+	}
 	if cfg.RobotTokensFile != "" {
 		s.invites = newRobotInvites(cfg.RobotTokensFile)
 		if _, err := s.invites.ok("", "-"); err != nil {
@@ -203,13 +205,13 @@ func New(cfg Config) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+wire.ConnectPath, s.handleRobotConnect)
-	mux.HandleFunc("GET /{$}", s.handleIndex)
-	mux.HandleFunc("GET /pair", s.handlePair)
+	mux.HandleFunc("GET /{$}", s.trySignIn(s.handleIndex))
+	mux.HandleFunc("GET /pair", s.trySignIn(s.handlePair))
 	mux.HandleFunc("GET /api/robots", s.handleListRobots)
 	mux.HandleFunc("GET /api/info", s.handleInfo)
 	mux.HandleFunc("GET /e2e.js", s.handleE2EScript)
 	mux.HandleFunc("GET /auth/login", s.handleLogin)
-	mux.HandleFunc("GET /auth/callback", s.handleAuthCallback)
+	mux.HandleFunc("GET /auth/sso", s.handleSSOReturn)
 	mux.HandleFunc("POST /auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/me", s.handleMe)
 	mux.HandleFunc("POST /api/join", s.handleJoinRequest)

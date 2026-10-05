@@ -1,6 +1,6 @@
 package server
 
-// Robot access on a server with sign-in (cfg.OIDCIssuer set): every robot is either
+// Robot access on a server with sign-in (cfg.ManagerSignIn): every robot is either
 // **public** (anyone who sees its screen can pair with the code, as on a server without
 // sign-in) or **private**, the default: only its owner, signed in, may pair. The owner of a
 // robot an account added is that account; the server's own robots (shared token, or listed
@@ -12,7 +12,7 @@ import ()
 
 // mayPairLocked reports whether the browser session may pair with robotID. Must hold s.mu.
 func (s *Server) mayPairLocked(session, robotID string) bool {
-	if s.oidc == nil || s.public[robotID] {
+	if s.sso == nil || s.public[robotID] {
 		return true
 	}
 	a, ok := s.logins[session]

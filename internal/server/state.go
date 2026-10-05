@@ -34,6 +34,7 @@ type stateFile struct {
 	Robots   []robotRecord       `json:"robots"`
 
 	Logins      map[string]Account `json:"logins,omitempty"`        // browser session id -> signed-in account
+	Handles     map[string]string  `json:"sso_handles,omitempty"`   // browser session id -> its sign-in's handle at the manager
 	Owned       []ownedInvite      `json:"owned_invites,omitempty"` // robots added by accounts (token hashes only)
 	OwnerRobots []string           `json:"owner_robots,omitempty"`  // ids seen with the shared token
 	Public      []string           `json:"public_robots,omitempty"` // robots anyone may pair with by code
@@ -105,7 +106,9 @@ func (s *Server) loadState() error {
 		s.robots[r.ID] = rs
 	}
 	for k, v := range st.Logins {
-		s.logins[k] = v
+		if h := st.Handles[k]; h != "" && s.sso != nil { // a sign-in without a handle cannot be checked: dropped
+			s.logins[k], s.handles[k] = v, h
+		}
 	}
 	for _, inv := range st.Owned {
 		s.owned[inv.RobotID] = inv
@@ -133,6 +136,7 @@ func (s *Server) snapshot() ([]byte, error) {
 	}
 	if len(s.logins) > 0 {
 		st.Logins = maps.Clone(s.logins)
+		st.Handles = maps.Clone(s.handles)
 	}
 	for _, inv := range s.owned {
 		st.Owned = append(st.Owned, inv)

@@ -1,49 +1,41 @@
 package server
 
-// Sign-in and self-service robot invites. With an OpenID Connect provider configured (Dex
-// at auth.w42.eu: GitHub, Google), people sign in on the dashboard and add their own robots:
-// the server makes a robot's invite token, shows it once, and keeps only its hash, bound to
-// the account. Signing in gives no access to any robot: browsers still pair only by the
-// code on the robot's own screen.
+// Sign-in through the Stackchan manager (package sso): one sign-in for every app. The dashboard
+// sends a browser without a session to the manager; signed in there, it comes back signed in
+// here without a click. A page load tries that silently once in a while (no sign-in there: the
+// page works as before, anonymously). Sign-ins are checked with the manager every minute, so
+// signing out anywhere signs out here too. Signing in gives no access to any robot by itself:
+// browsers pair by the code on the robot's screen, and a robot's owner (the manager says who)
+// gets it without a code.
 
 import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
-	"errors"
 	"fmt"
+	"html"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/coreos/go-oidc/v3/oidc"
-	"golang.org/x/oauth2"
+	"github.com/mj41/s-w42-eu-raw/sso"
 )
 
 const (
-	loginTTL                = 10 * time.Minute // from /auth/login to /auth/callback
-	maxPendingLogins        = 1000
 	defaultRobotsPerAccount = 3
+	ssoTriedCookie          = "raw_sso_tried"  // a silent sign-in was tried lately: not again yet
+	ssoRetry                = 10 * time.Minute // how often a page load tries the silent sign-in
+	signInCheckEvery        = time.Minute
 )
 
-// Account is a signed-in person. Key is the provider's issuer and subject: stable and
-// unique; Name and Email are for display (Email only when the provider verified it).
-type Account struct {
-	Key   string `json:"key"`
-	Name  string `json:"name"`
-	Email string `json:"email,omitempty"`
-	// From Dex's federated_claims: the upstream provider (connector id, e.g. "github") and its
-	// user id, and the login there (preferred_username); for tiers (tiers.go).
-	Provider   string `json:"provider,omitempty"`
-	ProviderID string `json:"provider_id,omitempty"`
-	Login      string `json:"login,omitempty"`
-}
+// Account is a signed-in person, as the manager knows them (sso.Account): Key is stable and the
+// same in every app; Email only when the provider verified it; Provider, ProviderID and Login
+// are for tiers (tiers.go).
+type Account = sso.Account
 
 // ownedInvite is a robot an account added: the SHA-256 of its token, never the token.
 type ownedInvite struct {
@@ -52,80 +44,6 @@ type ownedInvite struct {
 	Owner     string    `json:"owner"` // Account.Key
 	OwnerName string    `json:"owner_name"`
 	Created   time.Time `json:"created"`
-}
-
-type pendingLogin struct {
-	session, nonce, verifier, next string
-	expires                        time.Time
-}
-
-// oidcLogin talks to the provider. The provider is looked up on first use, so the server
-// starts even while the provider is down.
-type oidcLogin struct {
-	issuer, clientID, clientSecret, redirectURL string
-
-	mu       sync.Mutex
-	verifier *oidc.IDTokenVerifier
-	conf     *oauth2.Config
-	pending  map[string]pendingLogin // state -> login in progress
-}
-
-func newOIDCLogin(cfg Config) *oidcLogin {
-	if cfg.OIDCIssuer == "" || cfg.OIDCClientID == "" {
-		return nil
-	}
-	redirect := cfg.OIDCRedirectURL
-	if redirect == "" {
-		redirect = strings.TrimRight(cfg.PublicURL, "/") + "/auth/callback"
-	}
-	return &oidcLogin{issuer: cfg.OIDCIssuer, clientID: cfg.OIDCClientID, clientSecret: cfg.OIDCClientSecret,
-		redirectURL: redirect, pending: map[string]pendingLogin{}}
-}
-
-func (o *oidcLogin) setup(ctx context.Context) (*oauth2.Config, *oidc.IDTokenVerifier, error) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.conf != nil {
-		return o.conf, o.verifier, nil
-	}
-	p, err := oidc.NewProvider(ctx, o.issuer)
-	if err != nil {
-		return nil, nil, fmt.Errorf("sign-in provider %s: %w", o.issuer, err)
-	}
-	o.conf = &oauth2.Config{ClientID: o.clientID, ClientSecret: o.clientSecret, RedirectURL: o.redirectURL,
-		Endpoint: p.Endpoint(), Scopes: []string{oidc.ScopeOpenID, "email", "profile", "federated:id"}}
-	o.verifier = p.Verifier(&oidc.Config{ClientID: o.clientID})
-	return o.conf, o.verifier, nil
-}
-
-func (o *oidcLogin) begin(session, next string) (state string, p pendingLogin) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	now := time.Now()
-	for k, v := range o.pending {
-		if now.After(v.expires) {
-			delete(o.pending, k)
-		}
-	}
-	if len(o.pending) >= maxPendingLogins {
-		o.pending = map[string]pendingLogin{} // flooded: start over rather than grow
-	}
-	state = randHex(16)
-	// Back to a page of this server only: a path, never "//host" or a URL.
-	if !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.ContainsAny(next, "\\\r\n") {
-		next = "/#your-robots"
-	}
-	p = pendingLogin{session: session, nonce: randHex(16), verifier: oauth2.GenerateVerifier(), next: next, expires: now.Add(loginTTL)}
-	o.pending[state] = p
-	return state, p
-}
-
-func (o *oidcLogin) finish(state string) (pendingLogin, bool) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	p, ok := o.pending[state]
-	delete(o.pending, state)
-	return p, ok && time.Now().Before(p.expires)
 }
 
 func randHex(n int) string {
@@ -164,104 +82,133 @@ func emailTrusted(a Account) bool {
 	return false
 }
 
-// GET /auth/login: off to the provider.
+// GET /auth/login?next=/path: off to the manager.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if s.oidc == nil {
+	if s.sso == nil {
 		http.NotFound(w, r)
 		return
 	}
-	session := s.session(w, r)
-	conf, _, err := s.oidc.setup(r.Context())
-	if err != nil {
-		s.log.Warn("sign-in", "err", err)
-		http.Error(w, "sign-in is not available right now, try again later", http.StatusServiceUnavailable)
-		return
-	}
-	state, p := s.oidc.begin(session, r.URL.Query().Get("next"))
-	http.Redirect(w, r, conf.AuthCodeURL(state, oidc.Nonce(p.nonce), oauth2.S256ChallengeOption(p.verifier)), http.StatusFound)
+	http.Redirect(w, r, s.sso.LoginURL(s.ssoReturn(localPath(r.URL.Query().Get("next"))), false), http.StatusFound)
 }
 
-// GET /auth/callback: back from the provider with a code.
-func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
-	if s.oidc == nil {
+// ssoReturn is this server's address where the manager sends the browser back.
+func (s *Server) ssoReturn(next string) string {
+	return strings.TrimRight(s.cfg.PublicURL, "/") + "/auth/sso?next=" + url.QueryEscape(next)
+}
+
+// localPath is next if it is a path of this site, else "/" (never "//host" or a URL).
+func localPath(next string) string {
+	if !strings.HasPrefix(next, "/") || strings.HasPrefix(next, "//") || strings.ContainsAny(next, "\\\r\n") {
+		return "/"
+	}
+	return next
+}
+
+// trySignIn wraps a page: a browser not signed in here goes to the manager silently first (at
+// most every ssoRetry), and comes back signed in if it is signed in there.
+func (s *Server) trySignIn(page http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.sso == nil || r.URL.Query().Has("signin") {
+			page(w, r)
+			return
+		}
+		if _, err := r.Cookie(ssoTriedCookie); err == nil { // tried lately
+			page(w, r)
+			return
+		}
+		if _, ok := s.account(s.session(w, r)); ok {
+			page(w, r)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: ssoTriedCookie, Value: "1", Path: "/", MaxAge: int(ssoRetry / time.Second),
+			HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: strings.HasPrefix(s.cfg.PublicURL, "https://")})
+		http.Redirect(w, r, s.sso.LoginURL(s.ssoReturn(r.URL.RequestURI()), true), http.StatusFound)
+	}
+}
+
+// GET /auth/sso?next=…&code=… (or &error=…): back from the manager.
+func (s *Server) handleSSOReturn(w http.ResponseWriter, r *http.Request) {
+	if s.sso == nil {
 		http.NotFound(w, r)
 		return
 	}
 	session := s.session(w, r)
 	q := r.URL.Query()
-	p, ok := s.oidc.finish(q.Get("state"))
-	if !ok || p.session != session {
-		authPage(w, http.StatusBadRequest, "Sign-in expired", "Please start again from the dashboard.")
+	next := localPath(q.Get("next"))
+	if q.Get("code") == "" { // not signed in at the manager (silent), or cancelled: carry on without
+		http.Redirect(w, r, withQuery(next, "signin", "no"), http.StatusSeeOther)
 		return
 	}
-	if e := q.Get("error"); e != "" {
-		authPage(w, http.StatusOK, "Not signed in", "The sign-in was cancelled.")
-		return
-	}
-	acct, err := s.exchange(r.Context(), q.Get("code"), p)
-	if err != nil {
-		s.log.Warn("sign-in failed", "err", err)
+	a, err := s.sso.Exchange(r.Context(), q.Get("code"))
+	if err != nil || !a.OK {
+		if err != nil {
+			s.log.Warn("sign-in failed", "err", err)
+		}
 		authPage(w, http.StatusBadGateway, "Sign-in failed", "Please try again.")
 		return
 	}
 	s.mu.Lock()
-	s.logins[session] = acct
-	s.pairOwnedLocked(session, acct)
+	s.logins[session] = *a.Account
+	s.handles[session] = a.Handle
+	s.pairOwnedLocked(session, *a.Account)
 	s.mu.Unlock()
 	s.requestSave()
-	s.log.Info("signed in", "account", accountLogID(acct.Key))
-	http.Redirect(w, r, p.next, http.StatusSeeOther)
+	s.log.Info("signed in", "account", accountLogID(a.Account.Key))
+	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
-func (s *Server) exchange(ctx context.Context, code string, p pendingLogin) (Account, error) {
-	conf, verifier, err := s.oidc.setup(ctx)
+// withQuery adds a query parameter to a local path.
+func withQuery(path, key, value string) string {
+	u, err := url.Parse(path)
 	if err != nil {
-		return Account{}, err
+		return "/"
 	}
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	tok, err := conf.Exchange(ctx, code, oauth2.VerifierOption(p.verifier))
-	if err != nil {
-		return Account{}, fmt.Errorf("code exchange: %w", err)
+	q := u.Query()
+	q.Set(key, value)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// RunSignInCheck asks the manager about every sign-in every minute, and ends those it ended
+// (signed out there or in another app), until ctx ends.
+func (s *Server) RunSignInCheck(ctx context.Context) {
+	if s.sso == nil {
+		return
 	}
-	raw, _ := tok.Extra("id_token").(string)
-	if raw == "" {
-		return Account{}, errors.New("no id_token")
-	}
-	idt, err := verifier.Verify(ctx, raw)
-	if err != nil {
-		return Account{}, fmt.Errorf("id_token: %w", err)
-	}
-	if subtle.ConstantTimeCompare([]byte(idt.Nonce), []byte(p.nonce)) != 1 {
-		return Account{}, errors.New("id_token: wrong nonce")
-	}
-	var c struct {
-		Email             string `json:"email"`
-		EmailVerified     bool   `json:"email_verified"`
-		Name              string `json:"name"`
-		PreferredUsername string `json:"preferred_username"`
-		Federated         struct {
-			ConnectorID string `json:"connector_id"`
-			UserID      string `json:"user_id"`
-		} `json:"federated_claims"`
-	}
-	if err := idt.Claims(&c); err != nil {
-		return Account{}, err
-	}
-	a := Account{Key: idt.Issuer + "|" + idt.Subject, Provider: c.Federated.ConnectorID, ProviderID: c.Federated.UserID}
-	if a.Provider != "" {
-		a.Login = c.PreferredUsername // the login at that provider (Dex's GitHub connector: the GitHub login)
-	}
-	if c.EmailVerified {
-		a.Email = c.Email
-	}
-	for _, n := range []string{c.Name, c.PreferredUsername, a.Email, "you"} {
-		if n != "" {
-			a.Name = n
-			break
+	t := time.NewTicker(signInCheckEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.checkSignIns(ctx)
 		}
 	}
-	return a, nil
+}
+
+func (s *Server) checkSignIns(ctx context.Context) {
+	s.mu.Lock()
+	handles := make(map[string]string, len(s.handles))
+	for session, h := range s.handles {
+		handles[session] = h
+	}
+	s.mu.Unlock()
+	for session, h := range handles {
+		on, err := s.sso.Check(ctx, h)
+		if err != nil {
+			s.log.Warn("sign-in check", "err", err)
+		}
+		if !on {
+			s.mu.Lock()
+			if s.handles[session] == h {
+				delete(s.logins, session)
+				delete(s.handles, session)
+			}
+			s.mu.Unlock()
+			s.requestSave()
+		}
+	}
 }
 
 // accountLogID identifies an account in logs without its e-mail or name.
@@ -275,7 +222,7 @@ func authPage(w http.ResponseWriter, status int, title, text string) {
 	w.WriteHeader(status)
 	fmt.Fprintf(w, `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">`+
 		`<title>%s</title><body style="font-family:system-ui;padding:16px"><h1>%s</h1><p>%s</p>`+
-		`<p><a href="/">Open dashboard</a></p>`, title, title, text)
+		`<p><a href="/?signin=no">Open dashboard</a></p>`, html.EscapeString(title), html.EscapeString(title), html.EscapeString(text))
 }
 
 // POST /auth/logout
@@ -286,9 +233,16 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	session := s.session(w, r)
 	s.mu.Lock()
+	h := s.handles[session]
 	delete(s.logins, session)
+	delete(s.handles, session)
 	s.mu.Unlock()
 	s.requestSave()
+	if s.sso != nil && h != "" { // signing out here signs out of every app
+		if err := s.sso.Logout(r.Context(), h); err != nil {
+			s.log.Warn("sign-out at the manager", "err", err)
+		}
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -316,7 +270,7 @@ func (s *Server) robotURLReachable() bool {
 // GET /api/me
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	session := s.session(w, r)
-	me := map[string]any{"sign_in": s.oidc != nil, "manager_url": s.cfg.ManagerURL}
+	me := map[string]any{"sign_in": s.sso != nil, "manager_url": s.cfg.ManagerURL}
 	a, ok := s.account(session)
 	if ok {
 		s.mu.Lock()

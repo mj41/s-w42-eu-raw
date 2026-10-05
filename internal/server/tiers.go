@@ -155,7 +155,7 @@ func (s *Server) accountTier(a Account, now time.Time) int {
 
 // sessionTier is the tier of a browser session.
 func (s *Server) sessionTier(session string, now time.Time) int {
-	if s.oidc == nil {
+	if s.sso == nil {
 		return 1 // no sign-in: a home server
 	}
 	a, ok := s.account(session)
