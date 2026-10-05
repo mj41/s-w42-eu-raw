@@ -129,7 +129,8 @@ type PairCodeBody struct {
 
 // PairedBody tells the robot a browser just paired; Viewers is the total count.
 type PairedBody struct {
-	Viewers int `json:"viewers"`
+	Viewers  int `json:"viewers"`  // browsers paired with the robot
+	Watching int `json:"watching"` // of them, with the app open now (what the robot shows)
 	// Reconnect: sent right after Accepted because browsers were paired before, not
 	// because someone just scanned. A robot showing its QR on purpose may keep it.
 	Reconnect bool `json:"reconnect,omitempty"`

@@ -75,17 +75,19 @@ type Server struct {
 	ownerRobots map[string]bool        // robot ids seen with the shared token: never claimable
 	public      map[string]bool        // robots anyone may pair with by code (access.go); the rest are private
 
-	robotFails *failLimiter   // failed robot logins per address
-	streams    *streamLimiter // open browser streams per session and address
-	tiers      *tierRules     // nil without a tiers file
-	cmdMu      sync.Mutex
-	cmdBuckets map[string]*bucket         // command budget per browser session
-	pairFails  *failLimiter               // wrong pairing codes per address
-	sessions   map[string]map[string]bool // browser session id -> paired robot ids
-	subs       map[*subscriber]struct{}   // open SSE streams
-	pings      map[string]pendingPing     // "robot/ping id" -> in-flight ping
-	media      map[*mediaSub]struct{}     // browser media sockets
-	joins      map[string]*joinRequest    // pending join requests by id (join.go)
+	robotFails  *failLimiter   // failed robot logins per address
+	streams     *streamLimiter // open browser streams per session and address
+	tiers       *tierRules     // nil without a tiers file
+	cmdMu       sync.Mutex
+	cmdBuckets  map[string]*bucket         // command budget per browser session
+	pairFails   *failLimiter               // wrong pairing codes per address
+	sessions    map[string]map[string]bool // browser session id -> paired robot ids
+	seenMu      sync.Mutex
+	sessionSeen map[string]time.Time     // browser session id -> its last request: pairings unused for pairingTTL go
+	subs        map[*subscriber]struct{} // open SSE streams
+	pings       map[string]pendingPing   // "robot/ping id" -> in-flight ping
+	media       map[*mediaSub]struct{}   // browser media sockets
+	joins       map[string]*joinRequest  // pending join requests by id (join.go)
 	// last join request per client IP, for rate limiting
 	joinLastByIP map[string]time.Time
 
@@ -163,11 +165,13 @@ func New(cfg Config) *Server {
 		robots:   map[string]*robotState{},
 		codes:    map[string]pairCode{},
 		sessions: map[string]map[string]bool{},
-		subs:     map[*subscriber]struct{}{},
-		pings:    map[string]pendingPing{},
-		media:    map[*mediaSub]struct{}{},
-		joins:    map[string]*joinRequest{},
-		saveNow:  make(chan struct{}, 1),
+
+		sessionSeen: map[string]time.Time{},
+		subs:        map[*subscriber]struct{}{},
+		pings:       map[string]pendingPing{},
+		media:       map[*mediaSub]struct{}{},
+		joins:       map[string]*joinRequest{},
+		saveNow:     make(chan struct{}, 1),
 
 		joinLastByIP: map[string]time.Time{},
 		robotFails:   newFailLimiter(maxRobotAuthFails, failWindow, cfg.NoAddressLimits),
@@ -538,6 +542,9 @@ const sessionCookie = "stackchan_session"
 // but has no paired robots.
 func (s *Server) session(w http.ResponseWriter, r *http.Request) string {
 	if c, err := r.Cookie(sessionCookie); err == nil && validSessionID(c.Value) {
+		s.seenMu.Lock()
+		s.sessionSeen[c.Value] = time.Now().UTC().Truncate(time.Hour) // hours are enough for pairingTTL
+		s.seenMu.Unlock()
 		return c.Value
 	}
 	b := make([]byte, 32)
@@ -603,6 +610,10 @@ func (s *Server) commandSent(id, command string, args map[string]any) {
 func (s *Server) viewerCount(robotID string) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.viewerCountLocked(robotID)
+}
+
+func (s *Server) viewerCountLocked(robotID string) int {
 	n := 0
 	for _, paired := range s.sessions {
 		if paired[robotID] {
@@ -610,4 +621,30 @@ func (s *Server) viewerCount(robotID string) int {
 		}
 	}
 	return n
+}
+
+// watchingLocked: the paired browsers with the app open now (an event stream). s.mu held.
+func (s *Server) watchingLocked(robotID string) int {
+	seen := map[string]bool{}
+	for sub := range s.subs {
+		if s.sessions[sub.session][robotID] {
+			seen[sub.session] = true
+		}
+	}
+	return len(seen)
+}
+
+// tellWatching sends each robot of the session how many browsers are paired and watching now
+// (a browser opened or closed the app). s.mu not held.
+func (s *Server) tellWatching(session string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id := range s.sessions[session] {
+		if rs := s.robots[id]; rs != nil && rs.conn != nil {
+			if f, err := wire.Marshal(wire.KindPaired, wire.Meta{WorkerID: id},
+				wire.PairedBody{Viewers: s.viewerCountLocked(id), Watching: s.watchingLocked(id)}); err == nil {
+				rs.conn.enqueue(f)
+			}
+		}
+	}
 }

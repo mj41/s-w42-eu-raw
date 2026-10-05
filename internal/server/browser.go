@@ -114,7 +114,10 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 
 	// Tell the robot, and replace the used code so the QR on screen stays valid.
 	if conn != nil {
-		if f, err := wire.Marshal(wire.KindPaired, wire.Meta{WorkerID: robotID}, wire.PairedBody{Viewers: viewers}); err == nil {
+		s.mu.Lock()
+		watching := s.watchingLocked(robotID)
+		s.mu.Unlock()
+		if f, err := wire.Marshal(wire.KindPaired, wire.Meta{WorkerID: robotID}, wire.PairedBody{Viewers: viewers, Watching: watching}); err == nil {
 			conn.enqueue(f)
 		}
 		s.sendPairCode(conn)
@@ -151,10 +154,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.subs[sub] = struct{}{}
 	s.mu.Unlock()
+	s.tellWatching(session) // the robots show how many watch now
 	defer func() {
 		s.mu.Lock()
 		delete(s.subs, sub)
 		s.mu.Unlock()
+		s.tellWatching(session)
 	}()
 
 	send := func(ev sseEvent) bool {

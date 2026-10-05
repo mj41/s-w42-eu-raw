@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"io"
@@ -815,5 +816,37 @@ func TestAssetUploadInChunks(t *testing.T) {
 	}
 	if !bytes.Equal(got, data) {
 		t.Fatal("reassembled file differs")
+	}
+}
+
+// The robot hears how many paired browsers have the app open now (watching), not only how many
+// ever paired: opening the event stream counts, closing it does not.
+func TestWatchingNow(t *testing.T) {
+	ts, _ := newTestServer(t)
+	rb, code := robotWithCode(t, ts, testToken, "stackchan-0a1b2c3d4e50")
+	u := newUser(t, ts.URL)
+	if got := u.pair(code); got != http.StatusSeeOther {
+		t.Fatalf("pair: %d", got)
+	}
+	var p wire.PairedBody
+	rb.expect(wire.KindPaired, &p)
+	if p.Viewers != 1 || p.Watching != 0 {
+		t.Fatalf("after pairing: %+v", p)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL+"/api/events", nil)
+	resp, err := u.c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rb.expect(wire.KindPaired, &p)
+	if p.Viewers != 1 || p.Watching != 1 {
+		t.Fatalf("the app open: %+v", p)
+	}
+	cancel()
+	resp.Body.Close()
+	rb.expect(wire.KindPaired, &p)
+	if p.Watching != 0 {
+		t.Fatalf("the app closed: %+v", p)
 	}
 }
