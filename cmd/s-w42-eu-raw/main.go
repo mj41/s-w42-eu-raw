@@ -29,7 +29,6 @@ import (
 	"time"
 
 	"github.com/mj41/s-w42-eu-raw/internal/server"
-	"github.com/mj41/s-w42-eu-raw/wire"
 )
 
 func main() {
@@ -56,9 +55,7 @@ func main() {
 		managerSecret = flag.String("manager-secret-file", "", "file with this app's secret at the manager")
 		tiersFile     = flag.String("tiers-file", "", "tiers 1-3 by e-mail or GitHub login, one \"<tier> <email:|github:|github-id:>who\" per line, re-read when it changes (with sign-in only)")
 		sponsorURL    = flag.String("sponsor-url", "", "where signed-in people are pointed when they hit a limit")
-		offers        offerFlags
 	)
-	flag.Var(&offers, "offer", "offer robots another server: name=wss://host[,tokenfile] (repeatable; the token file holds that server's robot token)")
 	flag.Parse()
 
 	level := slog.LevelInfo
@@ -113,7 +110,6 @@ func main() {
 		ManagerSecret:   readSecretFile(*managerSecret, log),
 		SponsorURL:      *sponsorURL,
 		HTTPSPort:       httpsPort,
-		Offers:          offers,
 		Log:             log,
 	})
 	httpSrv := &http.Server{Addr: *listen, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
@@ -228,32 +224,6 @@ func lanIP() string {
 		return c.LocalAddr().(*net.UDPAddr).IP.String()
 	}
 	return "127.0.0.1"
-}
-
-// offerFlags collects -offer name=url[,tokenfile] values.
-type offerFlags []wire.OfferedServer
-
-func (o *offerFlags) String() string { return fmt.Sprint(len(*o), " offers") }
-
-func (o *offerFlags) Set(v string) error {
-	name, rest, ok := strings.Cut(v, "=")
-	if !ok || name == "" {
-		return fmt.Errorf("want name=url[,tokenfile]")
-	}
-	url, tokenFile, _ := strings.Cut(rest, ",")
-	if !strings.HasPrefix(url, "ws://") && !strings.HasPrefix(url, "wss://") {
-		return fmt.Errorf("url must start with ws:// or wss://")
-	}
-	offer := wire.OfferedServer{Name: name, URL: url}
-	if tokenFile != "" {
-		b, err := os.ReadFile(tokenFile)
-		if err != nil {
-			return err
-		}
-		offer.Token = strings.TrimSpace(string(b))
-	}
-	*o = append(*o, offer)
-	return nil
 }
 
 // invite prints a new invite token for one robot and the line for -robot-tokens-file.

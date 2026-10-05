@@ -21,8 +21,7 @@ import (
 //	stackchan-0a1b2c3d4e50 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
 //
 // The file is read again when it changes, so adding or revoking a robot needs no restart.
-// Robots with an invite token are guests: they get no ServerOffer (offers carry the other
-// servers' tokens).
+// Robots with an invite token are guests.
 
 // robotInvites holds the parsed tokens file.
 type robotInvites struct {

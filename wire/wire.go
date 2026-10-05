@@ -42,7 +42,6 @@ const (
 	KindPairCode     = "PairCode"
 	KindPaired       = "Paired"
 	KindRobotCommand = "RobotCommand"
-	KindServerOffer  = "ServerOffer"
 	KindManagedApps  = "ManagedApps"
 	KindAppsVersion  = "AppsVersion"
 
@@ -68,13 +67,6 @@ type E2EHelloBody struct {
 	B string `json:"b"` // browser id
 }
 
-// ServerOfferBody lists other servers this server lets its robots switch to
-// (voluntary): the robot adds them to its server list. Token is the robot
-// token for that server, when this server's operator may hand it out.
-type ServerOfferBody struct {
-	Servers []OfferedServer `json:"servers"`
-}
-
 // ManagedAppsBody is the robot's app list as its Stackchan manager set it, signed by the manager
 // (the robot has its key from the USB setup and checks it): the server only relays it.
 type ManagedAppsBody struct {
@@ -87,12 +79,6 @@ type ManagedAppsBody struct {
 // lists anyway). The same string is its Register label "apps_ver".
 type AppsVersionBody struct {
 	Versions string `json:"versions"`
-}
-
-type OfferedServer struct {
-	Name  string `json:"name"`
-	URL   string `json:"url"`
-	Token string `json:"token,omitempty"`
 }
 
 // ClassRobot is the only worker class this server accepts.
@@ -183,8 +169,7 @@ type PairedBody struct {
 //	snapshot                                   full-resolution still, arrives as BinSnapshot
 //	camera_config {"mirror": bool, "flip": bool}
 //	camera_reg {"reg": n, "value": v}          raw sensor register write (optional) and read
-//	server_add {"url", "name", "token"}        add/update an entry in the robot's server list
-//	server_remove / server_default / server_switch {"server": url or name}
+//	server_switch {"server": url or name}     suggest another app (the robot asks on its screen)
 //	screensaver {"on": bool}                   blank the screen / wake it
 //	standby    {"minutes": 1..120}             offline with the screen off
 //	speaker                                    (no JSON: audio arrives as BinSpeakerPCM)

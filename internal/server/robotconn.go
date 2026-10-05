@@ -147,12 +147,6 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 	if f, err := wire.Marshal(wire.KindAccepted, wire.Meta{WorkerID: id, SessionID: newCode()}, nil); err == nil {
 		c.enqueue(f)
 	}
-	// Offers carry the other servers' tokens: only for the owner's robots, never guests.
-	if len(s.cfg.Offers) > 0 && !guest {
-		if f, err := wire.Marshal(wire.KindServerOffer, wire.Meta{WorkerID: id}, wire.ServerOfferBody{Servers: s.cfg.Offers}); err == nil {
-			c.enqueue(f)
-		}
-	}
 	s.relayManaged(r.Context(), c)
 	s.sendPairCode(c)
 	// Browsers paired before (pairings survive restarts): tell the robot right away, so

@@ -753,21 +753,6 @@ func TestSnapshotStoredAndServedToPairedBrowsers(t *testing.T) {
 	}
 }
 
-func TestServerOfferSentToRobots(t *testing.T) {
-	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := New(Config{RobotToken: testToken, PairTTL: time.Minute, Log: quiet,
-		Offers: []wire.OfferedServer{{Name: "cloud", URL: "wss://chan.example", Token: "t0k"}}})
-	ts := httptest.NewServer(s.Handler())
-	s.cfg.PublicURL = ts.URL
-	t.Cleanup(ts.Close)
-	robot := connectRobot(t, ts, "chan-1", wire.ClassRobot)
-	var offer wire.ServerOfferBody
-	robot.expect(wire.KindServerOffer, &offer)
-	if len(offer.Servers) != 1 || offer.Servers[0].URL != "wss://chan.example" || offer.Servers[0].Token != "t0k" {
-		t.Fatalf("offer: %+v", offer)
-	}
-}
-
 func TestReconnectingRobotHearsItIsPaired(t *testing.T) {
 	ts, _ := newTestServer(t)
 	robot := connectRobot(t, ts, "chan-1", wire.ClassRobot)

@@ -48,12 +48,11 @@ type Config struct {
 	TiersFile     string   // tiers 1-3 by e-mail or GitHub login (tiers.go); empty: only admins are tier 1
 	SponsorURL    string   // where tier 4 is pointed when a limit is hit
 
-	PublicURL string               // base URL browsers use, e.g. http://192.168.1.10:8765
-	PairTTL   time.Duration        // lifetime of a pairing code
-	UIDir     string               // development: serve index.html from this directory instead of the embedded copy
-	StateFile string               // JSON snapshot of pairings and robots, loaded by New (see state.go); "" disables
-	HTTPSPort string               // port of the HTTPS listener for browsers, if any; advertised by /api/info
-	Offers    []wire.OfferedServer // other servers robots may switch to, sent as ServerOffer
+	PublicURL string        // base URL browsers use, e.g. http://192.168.1.10:8765
+	PairTTL   time.Duration // lifetime of a pairing code
+	UIDir     string        // development: serve index.html from this directory instead of the embedded copy
+	StateFile string        // JSON snapshot of pairings and robots, loaded by New (see state.go); "" disables
+	HTTPSPort string        // port of the HTTPS listener for browsers, if any; advertised by /api/info
 	Log       *slog.Logger
 }
 

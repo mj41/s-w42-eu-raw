@@ -31,8 +31,7 @@ func writeTokens(t *testing.T, path string, lines ...string) {
 func newInviteServer(t *testing.T, tokensFile string) *httptest.Server {
 	t.Helper()
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
-	s := New(Config{RobotToken: testToken, RobotTokensFile: tokensFile, PairTTL: time.Minute, Log: quiet,
-		Offers: []wire.OfferedServer{{Name: "cloud", URL: "wss://chan.example", Token: "t0k"}}})
+	s := New(Config{RobotToken: testToken, RobotTokensFile: tokensFile, PairTTL: time.Minute, Log: quiet})
 	ts := httptest.NewServer(s.Handler())
 	s.cfg.PublicURL = ts.URL
 	t.Cleanup(ts.Close)
@@ -105,19 +104,12 @@ func TestInviteTokens(t *testing.T) {
 	writeTokens(t, path, "# invited robots", line1)
 	ts := newInviteServer(t, path)
 
-	// A guest with its own token registers, and gets no offer (offers carry tokens).
+	// A guest with its own token registers; the owner's shared token still works.
 	kinds := registerGuest(t, ts, tok1, "guest-1")
 	if kinds[0] != wire.KindAccepted {
 		t.Fatalf("frames: %v", kinds)
 	}
-	for _, k := range kinds {
-		if k == wire.KindServerOffer {
-			t.Fatalf("a guest got a ServerOffer: %v", kinds)
-		}
-	}
-	// The owner's shared token still works, and gets the offer.
-	owner := registerGuest(t, ts, testToken, "own-1")
-	if !strings.Contains(strings.Join(owner, " "), wire.KindServerOffer) {
+	if owner := registerGuest(t, ts, testToken, "own-1"); owner[0] != wire.KindAccepted {
 		t.Fatalf("owner frames: %v", owner)
 	}
 

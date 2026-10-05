@@ -34,7 +34,7 @@ For each paired robot:
 - **Screen:** stickers over the face (heart, angry, sweat, shy, dizzy), 12 emoji (smile, grin, laugh, wink, love, cool, surprised, thinking, sleepy, cry, sob, angry) sent as a full-screen picture, or a picture from the phone. The picture is scaled to 320x240 in the browser and replaces the face until "Face".
 - **Live touch** (under Sensors): both fingers on the screen, drawn live (50 Hz) from the raw touch controller data. Events `touch_down` / `touch_up` (with duration) come from the same data.
 - **Camera extras:** "Snapshot 640×480" (shown below the video, with a download link), Mirror / Flip, and raw sensor registers (read / write, answer in Events).
-- **Servers:** the robot's server list (built-in, offered by servers with `-offer`, or added here with name, URL and robot token), with Switch, Pin as default / Unpin and Remove. Tokens never leave the robot. On the robot, the QR screen switches with Next and Pin makes the shown server the default (tap again to unpin; with no default the robot starts as a chooser and contacts nothing until you press Connect).
+- **Apps:** the robot's apps (from its managers), with **Switch** (the robot asks on its screen). Adding, removing and the start app are the robot's manager's job ([s-w42-eu-manager](https://github.com/mj41/s-w42-eu-manager)), never an app's.
 - **Head extras:** Servo power on/off, and Rotate ⟲ / Stop / ⟳ (continuous yaw, Slow/Medium/Fast, 3/10/30 s; the robot asks on its own screen first).
 - **Live IMU** (under Sensors): raw accelerometer, gyro and magnetometer at 100 Hz while the button is on (the robot streams only while someone watches), with "Download CSV" of up to 60 s.
 - **Camera & mic:** live video (JPEG, about 5 fps; 320×240, or 640×480 for tiers 1–3; one size for all watchers) and the robot's microphone, played through Web Audio. The robot streams only while someone watches or listens, and shows a red LIVE badge meanwhile.
@@ -68,7 +68,6 @@ go run ./cmd/fake-robot                    # simulated robot, in a second termin
 - `-public-url` sets the base URL put into QR codes. The default is `http://<LAN IP>:<port>`.
 - `-state-file` (default `~/.local/state/stackchan-server/state.json`, `""` disables) keeps pairings and known robots across restarts: browsers stay paired, and robots show up offline with their last telemetry and events until they reconnect. The whole file is rewritten every 5 s when something changed, right after a pairing, and on shutdown. It holds session IDs, so it is mode 0600. It is a stopgap until a real database.
 - `-tls-listen :8766` also serves the dashboard over HTTPS, for the phone's microphone ("Talk"). Without `-tls-cert`/`-tls-key` it creates a self-signed certificate for localhost, this host name and every local IP, and keeps it in `~/.config/stackchan-server/` so a phone accepts it only once. Robots stay on `-listen`. The pairing cookie is shared by both ports (same host).
-- `-offer name=wss://host[,tokenfile]` (repeatable) offers robots other servers they may switch to; with a token file, the robot also gets that server's robot token. Offers are voluntary: a server decides where its robots may go, and the robot owner can also add servers by hand. Offers go only to robots with the shared token, never to invited robots (below).
 - `-robot-tokens-file <file>`: other people's robots, each with its own invite token (see "Other people's robots" below). Off by default.
 - `-trusted-proxies 1` behind one reverse proxy that appends the client address to `X-Forwarded-For` (Envoy, nginx with `$proxy_add_x_forwarded_for`). The default 0 ignores that header, because clients can forge it. Limits and logs use the address.
 - **Limits:** 20 failed logins per address and robot id in 10 minutes, then HTTP 429 for that robot from that address, right token included (other robots behind the same address keep working); 20 wrong pairing codes per address in 10 minutes, then 429. Invited robots may send 300 messages/s and 512 KB/s on average (bursts of 1000 messages and 4 MB), and are disconnected above that; the owner's robots are not limited. Browsers: at most 8 open event streams per session and 30 per address, and 20 media sockets per address; media sockets per session and robot, and commands, pictures or uploads per second per session, depend on the tier (**Tiers** in [Robots set up by a manager](#robots-set-up-by-a-manager-and-sign-in); without sign-in everybody is tier 1: 4 sockets, 20 per second, bursts of 60); above that HTTP 429.
@@ -170,7 +169,6 @@ token>`) goes into the file you pass as `-robot-tokens-file`; the file holds no 
 - The server reads the file again when it changes: adding a robot (a new line) or revoking
   one (deleting its line) needs no restart. A broken file lets no invited robot in, and is
   logged; robots with the shared token keep working.
-- Invited robots get no server offers (`-offer`), which carry other servers' tokens.
 - Browsers still pair only by the code on the robot's own screen, so an invite gives a robot
   a place on the server, not anyone access to it.
 - Invited robots have send limits (above, "Limits").
@@ -229,7 +227,6 @@ What this server adds:
 - `Register` must be the first frame.
 - `Paired` comes after a pairing, and right after `Accepted` when browsers are already paired
   (pairings survive restarts), so the robot starts with its face instead of the QR screen.
-- `ServerOffer` (from `-offer`) comes after `Accepted`, only to robots with the shared token.
 - `E2E*` frames are relayed unread ([End-to-end encryption](#end-to-end-encryption)).
 - Browsers get each `RobotEvent` with a per-robot `seq`.
 
@@ -283,8 +280,7 @@ command table below.
 | `picture` | `{"asset": "pet/dream.jpg"}`: a stored picture instead of the face (`face` ends it) |
 | `play` | `{"asset": "snd/hello.wav", "volume": 0..100}`: a stored WAV (16-bit PCM, mono or stereo, 4-48 kHz), streamed from the file so any length works; `sound_done` {asset} at the end, `sound_error` {asset, reason}; `play_stop` ends it |
 | `touch_stream`, `imu_stream`, `light_stream` | `{"on": bool}`: sent by the server while a browser has `?touch=1` / `?imu=1` / `?light=1` open (an app server such as [s-w42-eu-pet](https://github.com/mj41/s-w42-eu-pet) may send `light_stream` itself) |
-| `server_add` | `{"url": "ws://…" or "wss://…", "name", "token"}`: add (or update) an entry in the robot's server list, stored on the robot |
-| `server_remove`, `server_default`, `server_switch` | `{"server": url or name}`: remove an entry (not the built-in or current one), make it the one used at start (`""` = no default: the robot starts as a chooser), or switch to it now (the robot leaves this server). A new default or a switch is asked on the robot's screen first (`server_asking`; without a Yes `server_refused`) |
+| `server_switch` | `{"server": url or name}`: suggest another of the robot's apps; the robot asks on its screen first |
 | `proximity` | `{"on": bool}`: the proximity sensor, whose IR LED next to the camera pulses ~10×/s. Off stops the LED and the approach events; light and auto-brightness keep working. Telemetry `proximity_on` |
 | `power_led` | `{"mode": "on\|off\|blink\|fast\|charging"}`: the red power LED; `charging` hands it back to the charger |
 | `nfc` | `{"on": bool}`: NFC tag polling, on by default. Listed only when the robot found its reader |

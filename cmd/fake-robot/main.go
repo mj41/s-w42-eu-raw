@@ -32,7 +32,7 @@ import (
 var commands = []string{"ping", "nod", "shake", "look", "home", "emotion", "say", "leds", "brightness", "volume",
 	"sticker", "face", "image", "camera", "mic", "screensaver", "standby", "speaker", "nfc", "ir_send", "power_led",
 	"hold", "servo_power", "rotate", "snapshot", "camera_config", "camera_reg", "imu_stream", "touch_stream",
-	"server_add", "server_remove", "server_default", "server_switch", "assets", "asset_delete"}
+	"server_switch", "assets", "asset_delete"}
 
 func main() {
 	var (

@@ -190,8 +190,7 @@ func newManagedServer(t *testing.T, m *fakeManager, stateFile string) (*httptest
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	s := New(Config{RobotToken: testToken, PairTTL: time.Minute, Log: quiet, StateFile: stateFile,
 		ManagerURL: m.ts.URL, ManagerSecret: managerSecret, ManagerSignIn: true,
-		AdminEmails: []string{"boss@example.com"},
-		Offers:      []wire.OfferedServer{{Name: "cloud", URL: "wss://chan.example", Token: "t0k"}}})
+		AdminEmails: []string{"boss@example.com"}})
 	ts := httptest.NewServer(s.Handler())
 	s.cfg.PublicURL = "https://chan.example"
 	t.Cleanup(ts.Close)

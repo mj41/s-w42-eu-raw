@@ -124,6 +124,7 @@
 </main>
 <script src="/e2e.js"></script>
 <script>
+let managerURL = ""; // the robots' manager (sm.w42.eu, or a home's own), from /api/me
 // End-to-end encryption (e2e.js; home-w42-eu docs/e2ee.md). A pairing redirect may carry the
 // robot's key and pairing secret in the fragment, which the server never saw.
 const pairedParam = new URLSearchParams(location.search).get("paired");
@@ -539,39 +540,31 @@ function makeCard(r) {
   }
 
   if (has("server_switch")) {
-    // The robot's server list (from its "servers" event; tokens never leave the robot).
-    // Switching makes the robot leave this server and connect to the other one.
+    // The robot's apps (from its "servers" event; tokens never leave the robot). Its managers add,
+    // remove and pin them (sm.w42.eu, or a home's own manager): an app only suggests a switch,
+    // which the robot asks on its screen.
     const list = el("div");
-    const name = el("input", { className: "code", style: "width:120px", placeholder: "Name", ariaLabel: "Server name" });
-    const url = el("input", { className: "code", style: "width:220px", placeholder: "wss://host or ws://host:8765", ariaLabel: "Server URL" });
-    const token = el("input", { className: "code", style: "width:150px", placeholder: "Robot token", type: "password", ariaLabel: "Robot token" });
     c.onServers = (d) => {
       let servers = [];
       try { servers = JSON.parse(d.list || "[]"); } catch { /* keep empty */ }
-      list.replaceChildren(...servers.map((sv) => {
+      list.replaceChildren(...servers.filter((sv) => sv.url).map((sv) => {
         const current = sv.url === d.current, dflt = sv.url === d.default;
-        const tags = [current && "current", dflt && "default", sv.origin, sv.token ? "token" : "no token"].filter(Boolean).join(" · ");
+        const tags = [current && "here now", dflt && "start app"].filter(Boolean).join(" · ");
         return el("div", { className: "row", style: "margin-top:6px" }, [
           el("span", { style: "min-width:120px", textContent: sv.name }),
-          el("span", { className: "muted", style: "font-size:0.85rem", textContent: `${sv.url} (${tags})` }),
+          el("span", { className: "muted", style: "font-size:0.85rem", textContent: sv.url + (tags ? ` (${tags})` : "") }),
           !current && el("button", { className: "soft", textContent: "Switch", onclick: () => {
-            if (confirm(`Switch ${c.id} to ${sv.name}? It leaves this server.`)) run("server_switch", { server: sv.url }, "switch to " + sv.name);
+            if (confirm(`Switch ${c.id} to ${sv.name}? It leaves this app; the robot asks on its screen.`)) run("server_switch", { server: sv.url }, "switch to " + sv.name);
           } }),
-          !dflt && el("button", { className: "soft", textContent: "Pin as default", onclick: () => run("server_default", { server: sv.url }, "pin " + sv.name) }),
-          dflt && el("button", { className: "soft", textContent: "Unpin", onclick: () => run("server_default", { server: "" }, "no default: the robot asks at start") }),
-          !current && sv.origin !== "built-in" && el("button", { className: "soft", textContent: "Remove", onclick: () => run("server_remove", { server: sv.url }, "remove " + sv.name) }),
         ].filter(Boolean));
       }));
     };
-    sections.push(el("h2", { textContent: "Servers" }), list,
-      el("div", { className: "row", style: "margin-top:10px" }, [name, url, token,
-        el("button", { className: "soft", textContent: "Add", onclick: () => {
-          if (!/^wss?:\/\//.test(url.value.trim())) { say("The URL must start with ws:// or wss://"); return; }
-          run("server_add", { name: name.value.trim(), url: url.value.trim(), token: token.value.trim() }, "add server");
-          name.value = url.value = token.value = "";
-        } })]),
-      el("div", { className: "muted", style: "font-size:0.85rem;margin-top:6px",
-        textContent: "On the robot, the QR screen (QR button in the swipe-up bar) switches servers with Next and pins the shown one as the default with Pin (tap again to unpin: then the robot asks at start)." }));
+    const mgr = el("a", { className: "mgr", target: "_blank", rel: "noopener", textContent: "its manager", hidden: !managerURL,
+      href: managerURL ? managerURL + "/" : "#" });
+    sections.push(el("h2", { textContent: "Apps" }), list,
+      el("div", { className: "muted", style: "font-size:0.85rem;margin-top:6px" }, [
+        "The robot's apps are added, removed and pinned on ", mgr,
+        " (they are not this app's to change). On the robot, the QR screen switches apps with Next and Connect."]));
   }
 
   if (has("assets")) {
@@ -1568,10 +1561,11 @@ empty.hidden = false;
 connect();
 // Account in the top bar (sign-in exists only when the server has it configured).
 fetch("/api/me", { credentials: "same-origin" }).then((r) => r.json()).then((me) => {
+  managerURL = me.manager_url || "";
   // Robots are added and set up on the manager that gave them their tokens.
   if (me.manager_url) {
     for (const a of document.querySelectorAll("a.mgr")) { a.href = me.manager_url + "/"; a.hidden = false; }
-    for (const a of document.querySelectorAll("a.mgr-setup")) a.href = me.manager_url + "/setup";
+    for (const a of document.querySelectorAll("a.mgr-setup")) a.href = me.manager_url + "/";
     for (const p of document.querySelectorAll(".mgr-p")) p.hidden = false;
   }
   const acct = document.getElementById("acct");
