@@ -4,10 +4,7 @@ FROM golang:1.26.8 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
-COPY cmd ./cmd
-COPY internal ./internal
-COPY wire ./wire
-COPY e2e ./e2e
+COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/s-w42-eu-raw ./cmd/s-w42-eu-raw
 
 FROM gcr.io/distroless/static-debian12:nonroot
