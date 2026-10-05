@@ -82,10 +82,11 @@ type ManagedAppsBody struct {
 	Sig     string `json:"sig"`     // base64, ECDSA P-256 over SHA-256 of the payload
 }
 
-// AppsVersionBody: robot -> server, the version of the app list it has now (after a ManagedApps;
-// never sealed: for the manager, who knows the list anyway).
+// AppsVersionBody: robot -> server, the versions of the app lists it has now, one per manager
+// ("<manager id>:<version>,…", after a ManagedApps; never sealed: for the managers, who know the
+// lists anyway). The same string is its Register label "apps_ver".
 type AppsVersionBody struct {
-	Version int32 `json:"version"`
+	Versions string `json:"versions"`
 }
 
 type OfferedServer struct {

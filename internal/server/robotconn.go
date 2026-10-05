@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -45,10 +44,10 @@ type robotConn struct {
 	send   chan outMsg
 	limits *guestLimits // invited robots only; nil for the owner's robots
 
-	mgrToken    string       // a token from the manager: asked about again every minute (managed.go)
-	managedSent int32        // the version of the signed app list relayed last
-	firmware    string       // from Register, for the manager (owner's page)
-	appsVersion atomic.Int32 // the app list version the robot has (label apps_ver, then AppsVersion)
+	mgrToken     string       // a token from the manager: asked about again every minute (managed.go)
+	managedSent  int32        // the version of the signed app list relayed last
+	firmware     string       // from Register, for the manager (owner's page)
+	appsVersions atomic.Value // string: its app lists' versions per manager (label apps_ver, then AppsVersion)
 
 	closeOnce sync.Once
 	done      chan struct{}
@@ -138,9 +137,7 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c.firmware = reg.Capabilities.Firmware
-	if v, err := strconv.Atoi(reg.Labels["apps_ver"]); err == nil {
-		c.appsVersion.Store(int32(v))
-	}
+	c.appsVersions.Store(reg.Labels["apps_ver"])
 	s.attach(c, reg)
 	defer s.detach(c)
 	s.log.Info("robot connected", "robot", id, "model", reg.Capabilities.Model,
@@ -290,8 +287,8 @@ func (s *Server) handleRobotFrame(c *robotConn, f wire.Frame) {
 		s.robotEvent(c.id, body)
 	case wire.KindAppsVersion:
 		var body wire.AppsVersionBody
-		if f.Decode(&body) == nil && body.Version > 0 {
-			c.appsVersion.Store(body.Version)
+		if f.Decode(&body) == nil && body.Versions != "" {
+			c.appsVersions.Store(body.Versions)
 			go s.relayManaged(context.Background(), c) // the manager learns at once
 		}
 	case wire.KindRobotPong:

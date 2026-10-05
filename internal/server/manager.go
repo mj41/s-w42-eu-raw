@@ -41,7 +41,8 @@ func (s *Server) relayManaged(ctx context.Context, c *robotConn) {
 	if s.manager == nil || c.mgrToken == "" {
 		return
 	}
-	auth, err := s.manager.Seen(ctx, c.id, c.mgrToken, robotauth.Seen{Firmware: c.firmware, AppsVersion: c.appsVersion.Load()})
+	versions, _ := c.appsVersions.Load().(string)
+	auth, err := s.manager.Seen(ctx, c.id, c.mgrToken, robotauth.Seen{Firmware: c.firmware, AppsVersions: versions})
 	if err != nil || !auth.OK || auth.Managed == nil {
 		return
 	}

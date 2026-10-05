@@ -105,8 +105,8 @@ func (c *Client) Check(ctx context.Context, robot, token string) (Auth, error) {
 // the manager's answer, fresh (the cache is updated). Apps call it after the robot registers and
 // every minute while it stays.
 type Seen struct {
-	Firmware    string `json:"firmware,omitempty"`
-	AppsVersion int32  `json:"apps_version,omitempty"` // the version of the app list the robot has
+	Firmware     string `json:"firmware,omitempty"`
+	AppsVersions string `json:"apps_versions,omitempty"` // "<manager id>:<version>,…": the app lists the robot has
 }
 
 func (c *Client) Seen(ctx context.Context, robot, token string, seen Seen) (Auth, error) {
