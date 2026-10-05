@@ -136,9 +136,10 @@ s-w42-eu-raw -public-url https://raw.example \
 - **One sign-in for all apps.** "Sign in" goes to the manager (`GET <manager>/sso`), which
   signs the person in once (GitHub or Google through Dex) and sends them back with a one-time
   code; this server trades it for the account (`POST <manager>/api/sso/token`, with this app's
-  secret). A page load tries that silently every 10 minutes at most, so someone signed in on
-  the manager or another app is signed in here without a click, and anyone else just uses the
-  page. Every minute this server asks the manager whether each sign-in is still on: signing out
+  secret). After someone signs in on the manager, it sets a hint cookie for its whole domain
+  (`w42_signed_in`, a random value, no credential); a page load here that sees a new hint tries
+  the sign-in silently once, so they are signed in here without a click. Without the hint
+  nobody is sent anywhere: anonymous visitors just use the page. Every minute this server asks the manager whether each sign-in is still on: signing out
   on the manager or in any app signs out here too, and signing out here signs out everywhere.
   The browser's cookie for the manager never comes here; this server keeps a session of its
   own. The package [`sso`](sso/sso.go) does it for any app (the pet uses it too).

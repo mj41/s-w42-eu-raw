@@ -21,6 +21,12 @@ import (
 	"time"
 )
 
+// HintCookie is set by the manager for its whole domain (e.g. w42.eu, -sign-in-hint-domain) when
+// a browser signs in there, and removed when it signs out: a random value, no credential. An app
+// on that domain sees it and tries a silent sign-in once per value (SilentHint), so a person who
+// signed in at the manager is signed in at the next page load, and others are never sent there.
+const HintCookie = "w42_signed_in"
+
 const (
 	timeout = 10 * time.Second
 	grace   = time.Hour // a sign-in confirmed within it stays on while the manager cannot be reached
@@ -164,4 +170,24 @@ func (c *Client) post(ctx context.Context, what string, body any, out any) error
 		return fmt.Errorf("manager: %w", err)
 	}
 	return nil
+}
+
+// SilentHint is the hint to try a silent sign-in with now, or "": a page load of a browser not
+// signed in here, with the manager's hint cookie set and not tried yet (the app keeps the value it
+// tried in its cookie triedCookie; MarkTried).
+func SilentHint(r *http.Request, triedCookie string) string {
+	hint, err := r.Cookie(HintCookie)
+	if err != nil || hint.Value == "" || len(hint.Value) > 64 {
+		return ""
+	}
+	if tried, err := r.Cookie(triedCookie); err == nil && tried.Value == hint.Value {
+		return ""
+	}
+	return hint.Value
+}
+
+// MarkTried remembers in the app's own cookie that the silent sign-in was tried with this hint.
+func MarkTried(w http.ResponseWriter, triedCookie, hint string, secure bool) {
+	http.SetCookie(w, &http.Cookie{Name: triedCookie, Value: hint, Path: "/", MaxAge: 30 * 24 * 3600,
+		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: secure})
 }

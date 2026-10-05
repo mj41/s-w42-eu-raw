@@ -2,8 +2,8 @@ package server
 
 // Sign-in through the Stackchan manager (package sso): one sign-in for every app. The dashboard
 // sends a browser without a session to the manager; signed in there, it comes back signed in
-// here without a click. A page load tries that silently once in a while (no sign-in there: the
-// page works as before, anonymously). Sign-ins are checked with the manager every minute, so
+// here without a click. A page load tries that silently once after each sign-in at the manager
+// (its hint cookie); everyone else just gets the page. Sign-ins are checked with the manager every minute, so
 // signing out anywhere signs out here too. Signing in gives no access to any robot by itself:
 // browsers pair by the code on the robot's screen, and a robot's owner (the manager says who)
 // gets it without a code.
@@ -27,8 +27,7 @@ import (
 
 const (
 	defaultRobotsPerAccount = 3
-	ssoTriedCookie          = "raw_sso_tried"  // a silent sign-in was tried lately: not again yet
-	ssoRetry                = 10 * time.Minute // how often a page load tries the silent sign-in
+	ssoTriedCookie          = "raw_sso_tried" // the manager's hint a silent sign-in was tried with
 	signInCheckEvery        = time.Minute
 )
 
@@ -104,15 +103,16 @@ func localPath(next string) string {
 	return next
 }
 
-// trySignIn wraps a page: a browser not signed in here goes to the manager silently first (at
-// most every ssoRetry), and comes back signed in if it is signed in there.
+// trySignIn wraps a page: a browser not signed in here, but signed in at the manager lately (its
+// hint cookie, sso.HintCookie), goes there silently once and comes back signed in.
 func (s *Server) trySignIn(page http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.sso == nil || r.URL.Query().Has("signin") {
 			page(w, r)
 			return
 		}
-		if _, err := r.Cookie(ssoTriedCookie); err == nil { // tried lately
+		hint := sso.SilentHint(r, ssoTriedCookie)
+		if hint == "" {
 			page(w, r)
 			return
 		}
@@ -120,8 +120,7 @@ func (s *Server) trySignIn(page http.HandlerFunc) http.HandlerFunc {
 			page(w, r)
 			return
 		}
-		http.SetCookie(w, &http.Cookie{Name: ssoTriedCookie, Value: "1", Path: "/", MaxAge: int(ssoRetry / time.Second),
-			HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: strings.HasPrefix(s.cfg.PublicURL, "https://")})
+		sso.MarkTried(w, ssoTriedCookie, hint, strings.HasPrefix(s.cfg.PublicURL, "https://"))
 		http.Redirect(w, r, s.sso.LoginURL(s.ssoReturn(r.URL.RequestURI()), true), http.StatusFound)
 	}
 }

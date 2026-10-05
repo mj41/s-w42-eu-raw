@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -236,18 +237,19 @@ func TestSignInReturnChecks(t *testing.T) {
 	}
 }
 
-// A page load tries the manager silently, once in a while: not signed in there, the page opens
-// anonymously; signed in there, it comes back signed in, without a click.
+// A page load goes to the manager silently only with the manager's hint cookie (signed in there
+// lately), once per hint: no hint, no trip; signed in there, back signed in without a click.
 func TestSilentSignIn(t *testing.T) {
 	m := newFakeManager(t)
 	ts, _ := newSignInServer(t, m, "")
 	u := newUser(t, ts.URL)
-	follow := func(path string) (int, string) {
+	follow := func(path string) (int, string, int) {
 		resp, err := u.c.Get(u.local(path))
 		if err != nil {
 			t.Fatal(err)
 		}
-		for i := 0; i < 5 && (resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusSeeOther); i++ {
+		hops := 0
+		for ; hops < 5 && (resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusSeeOther); hops++ {
 			loc := resp.Header.Get("Location")
 			if strings.HasPrefix(loc, "/") {
 				loc = ts.URL + loc
@@ -256,23 +258,30 @@ func TestSilentSignIn(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		return resp.StatusCode, resp.Request.URL.RequestURI()
+		return resp.StatusCode, resp.Request.URL.RequestURI(), hops
 	}
-	if code, at := follow(ts.URL + "/pair?code=X"); code == http.StatusFound || !strings.HasPrefix(at, "/pair?") || !strings.Contains(at, "signin=no") {
-		t.Fatalf("not signed in at the manager: %d at %s", code, at)
+	hint := func(v string) {
+		su, _ := url.Parse(ts.URL)
+		u.c.Jar.SetCookies(su, []*http.Cookie{{Name: sso.HintCookie, Value: v, Path: "/"}})
 	}
-	// Tried a moment ago: no new trip, even once signed in at the manager.
+	if _, _, hops := follow(ts.URL + "/pair?code=X"); hops != 0 { // (X is no valid code: 400)
+		t.Fatalf("no hint: %d hops", hops)
+	}
+	hint("g1") // signed in at the manager once, signed out since
+	if _, at, hops := follow(ts.URL + "/pair?code=X"); hops == 0 || !strings.HasPrefix(at, "/pair?") || !strings.Contains(at, "signin=no") {
+		t.Fatalf("hint, not signed in there: at %s after %d hops", at, hops)
+	}
+	if _, _, hops := follow(ts.URL + "/"); hops != 0 {
+		t.Fatalf("the same hint again: %d hops", hops)
+	}
+	// Signed in at the manager again (a new hint): signed in here at the next page load.
 	m.mu.Lock()
 	m.next = &sso.Account{Key: m.ts.URL + "|ema", Name: "Ema"}
 	m.mu.Unlock()
-	if resp, _ := u.c.Get(ts.URL + "/"); resp.StatusCode != http.StatusOK {
-		t.Fatalf("tried lately: %d", resp.StatusCode)
-	}
-	// Another browser, signed in at the manager: signed in here without a click.
-	u = newUser(t, ts.URL)
+	hint("g2")
 	follow(ts.URL + "/")
 	if _, me := u.do("GET", "/api/me", "", false); !strings.Contains(me, `"signed_in":true`) {
-		t.Fatalf("signed in at the manager: %s", me)
+		t.Fatalf("a new hint, signed in at the manager: %s", me)
 	}
 }
 
