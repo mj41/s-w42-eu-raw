@@ -33,6 +33,15 @@ type Auth struct {
 	OwnerName string `json:"owner_name"`
 	Public    bool   `json:"public"`
 	CacheS    int    `json:"cache_s"`
+	// The robot's app list as the owner set it on the manager, signed by the manager: the app
+	// relays it to the robot (wire.ManagedAppsBody); nil when the owner manages apps over USB only.
+	Managed *Managed `json:"managed,omitempty"`
+}
+
+// Managed is a signed app list (wire.ManagedAppsBody).
+type Managed struct {
+	Payload string `json:"payload"`
+	Sig     string `json:"sig"`
 }
 
 type cachedAuth struct {

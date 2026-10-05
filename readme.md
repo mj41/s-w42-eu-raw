@@ -102,6 +102,11 @@ s-w42-eu-raw -public-url https://raw.example \
   unpairs everybody else. Anonymous browsers cannot send "Ask a paired phone" requests.
 - The manager's answers are cached for a minute; when the manager cannot be reached, a robot
   it confirmed within the last hour may still connect. A refusal is never cached.
+- **Apps changed on the manager.** When the owner allowed it at the USB setup, the manager's
+  answer carries the robot's app list, signed by the manager (ECDSA P-256); this server relays it
+  to the robot (`ManagedApps`) when the robot connects and when its version changes (checked every
+  minute). The robot checks the signature with the manager's key from its setup; a server cannot
+  change it.
 - Other apps check robot tokens the same way with the package
   [`robotauth`](robotauth/robotauth.go) (`github.com/mj41/s-w42-eu-raw/robotauth`), e.g. the pet.
 - Without sign-in configured (a LAN server), every robot is public.

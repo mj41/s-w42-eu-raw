@@ -42,6 +42,9 @@ type robotConn struct {
 	send   chan outMsg
 	limits *guestLimits // invited robots only; nil for the owner's robots
 
+	mgrToken    string // a token from the manager: asked about again every minute (managed.go)
+	managedSent int32  // the version of the signed app list relayed last
+
 	closeOnce sync.Once
 	done      chan struct{}
 }
@@ -104,6 +107,9 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	ws.SetReadLimit(maxMessageBytes)
 	c := &robotConn{id: id, ws: ws, send: make(chan outMsg, 32), done: make(chan struct{})}
+	if guest && s.manager != nil {
+		c.mgrToken = token
+	}
 	if guest {
 		c.limits = newGuestLimits(now)
 	} else {
@@ -141,6 +147,7 @@ func (s *Server) handleRobotConnect(w http.ResponseWriter, r *http.Request) {
 			c.enqueue(f)
 		}
 	}
+	s.relayManaged(r.Context(), c)
 	s.sendPairCode(c)
 	// Browsers paired before (pairings survive restarts): tell the robot right away, so
 	// it starts with its face instead of the QR screen.

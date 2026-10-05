@@ -43,6 +43,7 @@ const (
 	KindPaired       = "Paired"
 	KindRobotCommand = "RobotCommand"
 	KindServerOffer  = "ServerOffer"
+	KindManagedApps  = "ManagedApps"
 
 	// End-to-end encrypted (home-w42-eu docs/e2ee.md; package e2e). The server only relays
 	// them: browser -> robot E2EEnroll, E2EHello, E2ECommand; robot -> browsers E2EGroupKey,
@@ -71,6 +72,13 @@ type E2EHelloBody struct {
 // token for that server, when this server's operator may hand it out.
 type ServerOfferBody struct {
 	Servers []OfferedServer `json:"servers"`
+}
+
+// ManagedAppsBody is the robot's app list as its Stackchan manager set it, signed by the manager
+// (the robot has its key from the USB setup and checks it): the server only relays it.
+type ManagedAppsBody struct {
+	Payload string `json:"payload"` // base64 of the JSON list
+	Sig     string `json:"sig"`     // base64, ECDSA P-256 over SHA-256 of the payload
 }
 
 type OfferedServer struct {

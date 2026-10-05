@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,11 +11,13 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/mj41/s-w42-eu-raw/robotauth"
 	"github.com/mj41/s-w42-eu-raw/sso"
 	"github.com/mj41/s-w42-eu-raw/wire"
 )
@@ -95,6 +98,7 @@ type fakeManager struct {
 type fakeManaged struct {
 	token, owner string
 	public       bool
+	managed      *robotauth.Managed // the signed app list the manager hands out
 }
 
 const managerSecret = "app-secret"
@@ -135,7 +139,7 @@ func newFakeManager(t *testing.T) *fakeManager {
 				json.NewEncoder(w).Encode(map[string]any{"ok": false})
 				return
 			}
-			json.NewEncoder(w).Encode(map[string]any{"ok": true, "owner": rb.owner, "owner_name": "x", "public": rb.public})
+			json.NewEncoder(w).Encode(map[string]any{"ok": true, "owner": rb.owner, "owner_name": "x", "public": rb.public, "managed": rb.managed})
 		case "/api/sso/token":
 			a, ok := m.codes[req.Code]
 			delete(m.codes, req.Code)
@@ -172,7 +176,7 @@ func (m *fakeManager) signOutEverywhere() {
 func (m *fakeManager) set(id, token, owner string, public bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.robots[id] = fakeManaged{token, owner, public}
+	m.robots[id] = fakeManaged{token: token, owner: owner, public: public}
 }
 
 func newSignInServer(t *testing.T, m *fakeManager, stateFile string) (*httptest.Server, *Server) {
@@ -329,5 +333,28 @@ func TestRobotURL(t *testing.T) {
 		if got := s.robotURLReachable(); got != c.reachable {
 			t.Errorf("robotURLReachable(%q) = %v, want %v", c.public, got, c.reachable)
 		}
+	}
+}
+
+// The robot's app list from the manager (signed there; the robot checks it) is relayed to the
+// robot when it connects; robots without one get none.
+func TestManagedAppsRelayed(t *testing.T) {
+	ts, _, m := newManagedServer(t, newFakeManager(t), "")
+	payload := base64.StdEncoding.EncodeToString([]byte(`{"robot":"stackchan-0a1b2c3d4e51","version":3}`))
+	m.set("stackchan-0a1b2c3d4e50", "tok-0", "o", false)
+	m.set("stackchan-0a1b2c3d4e51", "tok-1", "o", false)
+	m.mu.Lock()
+	rb := m.robots["stackchan-0a1b2c3d4e51"]
+	rb.managed = &robotauth.Managed{Payload: payload, Sig: "c2ln"}
+	m.robots["stackchan-0a1b2c3d4e51"] = rb
+	m.mu.Unlock()
+	if kinds := registerGuest(t, ts, "tok-0", "stackchan-0a1b2c3d4e50"); slices.Contains(kinds, wire.KindManagedApps) {
+		t.Errorf("no list from the manager, one relayed: %v", kinds)
+	}
+	if kinds := registerGuest(t, ts, "tok-1", "stackchan-0a1b2c3d4e51"); !slices.Contains(kinds, wire.KindManagedApps) {
+		t.Errorf("the manager's list not relayed: %v", kinds)
+	}
+	if v := managedVersion(payload); v != 3 {
+		t.Errorf("version %d", v)
 	}
 }
