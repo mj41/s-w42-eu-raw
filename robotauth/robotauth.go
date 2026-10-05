@@ -100,8 +100,43 @@ func (c *Client) Check(ctx context.Context, robot, token string) (Auth, error) {
 	return auth, nil
 }
 
+// Seen tells the manager the robot is connected to this app now, with what it reported (for the
+// owner's page: online, on which app, firmware, whether it has its latest app list), and returns
+// the manager's answer, fresh (the cache is updated). Apps call it after the robot registers and
+// every minute while it stays.
+type Seen struct {
+	Firmware    string `json:"firmware,omitempty"`
+	AppsVersion int32  `json:"apps_version,omitempty"` // the version of the app list the robot has
+}
+
+func (c *Client) Seen(ctx context.Context, robot, token string, seen Seen) (Auth, error) {
+	auth, err := c.askWith(ctx, robot, token, &seen)
+	if err != nil {
+		return c.Check(ctx, robot, token) // the cached answer, or the grace for a confirmed robot
+	}
+	key := sha256.Sum256([]byte(robot + "\x00" + token))
+	if auth.OK {
+		c.mu.Lock()
+		if len(c.cache) >= maxKeys {
+			c.cache = map[[sha256.Size]byte]cachedAuth{}
+		}
+		now := time.Now()
+		c.cache[key] = cachedAuth{auth: auth, fresh: now.Add(time.Duration(auth.CacheS) * time.Second), usable: now.Add(grace)}
+		c.mu.Unlock()
+	}
+	return auth, nil
+}
+
 func (c *Client) ask(ctx context.Context, robot, token string) (Auth, error) {
-	body, _ := json.Marshal(map[string]string{"robot": robot, "token": token})
+	return c.askWith(ctx, robot, token, nil)
+}
+
+func (c *Client) askWith(ctx context.Context, robot, token string, seen *Seen) (Auth, error) {
+	body, _ := json.Marshal(struct {
+		Robot string `json:"robot"`
+		Token string `json:"token"`
+		Seen  *Seen  `json:"seen,omitempty"`
+	}{robot, token, seen})
 	req, err := http.NewRequestWithContext(ctx, "POST", c.url+"/api/robot-auth", bytes.NewReader(body))
 	if err != nil {
 		return Auth{}, err

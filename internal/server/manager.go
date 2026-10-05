@@ -33,14 +33,15 @@ func (s *Server) managedRobotLocked(id string, auth robotauth.Auth) {
 	s.requestSave()
 }
 
-// relayManaged passes the robot's app list, as its owner set it on the manager and the manager
+// relayManaged tells the manager the robot is here (Seen: online, firmware, its app list version)
+// and passes the robot's app list, as its owner set it on the manager and the manager
 // signed it, on to the robot (it checks the signature itself). Sent when the robot connects and
 // when the version changes (RunManagedRelay); the manager's answers are cached for a minute.
 func (s *Server) relayManaged(ctx context.Context, c *robotConn) {
 	if s.manager == nil || c.mgrToken == "" {
 		return
 	}
-	auth, err := s.manager.Check(ctx, c.id, c.mgrToken)
+	auth, err := s.manager.Seen(ctx, c.id, c.mgrToken, robotauth.Seen{Firmware: c.firmware, AppsVersion: c.appsVersion.Load()})
 	if err != nil || !auth.OK || auth.Managed == nil {
 		return
 	}
