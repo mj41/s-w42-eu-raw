@@ -48,7 +48,7 @@ type robotConn struct {
 	mgrToken    string       // a token from the manager: asked about again every minute (managed.go)
 	managedSent int32        // the version of the signed app list relayed last
 	firmware    string       // from Register, for the manager (owner's page)
-	appsVersion atomic.Int32 // the app list version the robot has (label apps_ver, event apps_updated)
+	appsVersion atomic.Int32 // the app list version the robot has (label apps_ver, then AppsVersion)
 
 	closeOnce sync.Once
 	done      chan struct{}
@@ -288,8 +288,10 @@ func (s *Server) handleRobotFrame(c *robotConn, f wire.Frame) {
 		}
 		s.log.Info("robot event", "robot", c.id, "name", body.Name)
 		s.robotEvent(c.id, body)
-		if v, ok := body.Data["version"].(float64); ok && body.Name == "apps_updated" {
-			c.appsVersion.Store(int32(v))
+	case wire.KindAppsVersion:
+		var body wire.AppsVersionBody
+		if f.Decode(&body) == nil && body.Version > 0 {
+			c.appsVersion.Store(body.Version)
 			go s.relayManaged(context.Background(), c) // the manager learns at once
 		}
 	case wire.KindRobotPong:
