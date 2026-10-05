@@ -36,7 +36,7 @@ func (s *Server) managedRobotLocked(id string, auth robotauth.Auth) {
 // relayManaged tells the manager the robot is here (Seen: online, firmware, its app list version,
 // the browsers paired with it), drops the pairings the owner removed there, and passes the robot's app list, as its owner set it on the manager and the manager
 // signed it, on to the robot (it checks the signature itself). Sent when the robot connects and
-// when the version changes (RunManagedRelay); the manager's answers are cached for a minute.
+// when the version changes (RunManagedRelay, every managedEvery).
 func (s *Server) relayManaged(ctx context.Context, c *robotConn) {
 	if s.manager == nil || c.mgrToken == "" {
 		return
@@ -80,12 +80,17 @@ func managedVersion(payload string) int32 {
 	return p.Version
 }
 
-// RunManagedRelay relays changed app lists to the connected robots every minute until ctx ends.
+// managedEvery: how often the manager is asked about each connected robot (a switch the owner
+// asked for on the manager's page should come soon).
+const managedEvery = 15 * time.Second
+
+// RunManagedRelay relays changed app lists to the connected robots every managedEvery until ctx
+// ends.
 func (s *Server) RunManagedRelay(ctx context.Context) {
 	if s.manager == nil {
 		return
 	}
-	t := time.NewTicker(time.Minute)
+	t := time.NewTicker(managedEvery)
 	defer t.Stop()
 	for {
 		select {
