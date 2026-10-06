@@ -407,7 +407,11 @@ function makeCard(r) {
         csv.disabled = false;
         delete csv.dataset.alwaysDisabled;
       };
-      ws.onclose = () => { if (imu.ws === ws) { imu.ws = null; live.textContent = "Live IMU (100 Hz)"; } };
+      ws.onclose = (ev) => {
+        if (imu.ws !== ws) return;
+        imu.ws = null; live.textContent = "Live IMU (100 Hz)";
+        if (ev.code === 4429) out.textContent = ev.reason; // refused: too many streams open
+      };
       imu.ws = ws;
       live.textContent = "Stop live IMU";
     };
@@ -456,7 +460,11 @@ function makeCard(r) {
         }
         draw(pts); // the newest frame
       };
-      ws.onclose = () => { if (tl.ws === ws) { tl.ws = null; btn.textContent = "Live touch"; } };
+      ws.onclose = (ev) => {
+        if (tl.ws !== ws) return;
+        tl.ws = null; btn.textContent = "Live touch";
+        if (ev.code === 4429) { canvas.hidden = true; txt.textContent = ev.reason; }
+      };
       tl.ws = ws;
       btn.textContent = "Stop live touch";
       canvas.hidden = false;
@@ -502,7 +510,7 @@ function makeCard(r) {
         if (ls.samples.length > 200) ls.samples.splice(0, ls.samples.length - 200);
         draw();
       };
-      ws.onclose = () => { if (ls.ws === ws) stop(); };
+      ws.onclose = (ev) => { if (ls.ws === ws) { stop(); if (ev.code === 4429) txt.textContent = ev.reason; } };
       ls.ws = ws;
       btn.textContent = "Stop live light";
       canvas.hidden = false;
@@ -1021,8 +1029,14 @@ function makeCard(r) {
       };
       // Phones drop sockets when the screen sleeps or the tab is in the background:
       // reconnect while video or audio is still wanted.
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         if (media.ws !== ws) return;
+        if (ev.code === 4429) { // refused: too many streams open; trying again would not help
+          media.ws = null; media.video = media.audio = false;
+          reopen();
+          info.textContent = ev.reason;
+          return;
+        }
         info.textContent = "Stream closed, reconnecting…";
         setTimeout(() => { if (media.ws === ws) reopen(); }, 2000);
       };

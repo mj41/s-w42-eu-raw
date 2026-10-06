@@ -163,9 +163,21 @@ func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
 	}
 	tl := tierTable[s.sessionTier(session, time.Now())]
 	sub.full = sub.full && tl.FullVideo // 640x480 from tier 3 up; others get 320x240
-	keys := s.streamKeys("media", session+" "+id, s.clientIP(r), tl.MediaPerRobot, maxMediaPerAddr)
+	// The tier's limit is for video and audio; the sensor streams (IMU, touch, light: a few KB/s)
+	// have their own, larger allowance, so live sensors do not use up the video.
+	kind, perSession := "media", tl.MediaPerRobot
+	if !sub.video && !sub.audio && (sub.imu || sub.touch || sub.light) {
+		kind, perSession = "sensors", maxSensorsPerRobot
+	}
+	keys := s.streamKeys(kind, session+" "+id, s.clientIP(r), perSession, maxMediaPerAddr)
 	if !s.streams.acquire(keys) {
-		s.tooMany(w, session, "too many open media streams")
+		// Said on the socket: a browser cannot read the answer to a refused upgrade, it would only
+		// see the socket close and try again.
+		if ws, err := browserUpgrader.Upgrade(w, r, nil); err == nil {
+			ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(closeTooMany, s.tooManyText(session, kind)),
+				time.Now().Add(writeWait))
+			ws.Close()
+		}
 		return
 	}
 	defer s.streams.release(keys)

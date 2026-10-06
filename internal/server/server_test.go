@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -849,4 +850,40 @@ func TestWatchingNow(t *testing.T) {
 	if p.Watching != 0 {
 		t.Fatalf("the app closed: %+v", p)
 	}
+}
+
+// The tier's media limit counts video and audio only; live sensors have their own allowance. A
+// refused socket is closed with 4429 and the reason (a browser cannot read a refused upgrade).
+func TestMediaLimitsSayWhy(t *testing.T) {
+	ts, _ := newTestServer(t)
+	robot := connectRobot(t, ts, "chan-1", wire.ClassRobot)
+	browser := pairBrowser(t, robot)
+	open := func(query string) *websocket.Conn {
+		t.Helper()
+		ws, _, err := dialMedia(ts, browser, "chan-1", query, ts.URL)
+		if err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+		t.Cleanup(func() { ws.Close() })
+		return ws
+	}
+	refused := func(ws *websocket.Conn, want string) {
+		t.Helper()
+		ws.SetReadDeadline(time.Now().Add(2 * time.Second))
+		_, _, err := ws.ReadMessage()
+		var ce *websocket.CloseError
+		if !errors.As(err, &ce) || ce.Code != closeTooMany || !strings.Contains(ce.Text, want) {
+			t.Fatalf("want close %d %q, got %v", closeTooMany, want, err)
+		}
+	}
+	open("imu=1")
+	open("light=1")
+	for i := 0; i < tierTable[1].MediaPerRobot; i++ { // with live sensors on, all the video still
+		open("video=1")
+	}
+	refused(open("video=1"), "video and audio")
+	for i := 2; i < maxSensorsPerRobot; i++ {
+		open("touch=1")
+	}
+	refused(open("imu=1"), "live sensor")
 }

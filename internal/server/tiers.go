@@ -179,6 +179,19 @@ func (s *Server) tierHint(tier int) string {
 	return ""
 }
 
+// tooManyText is a refused media socket's close reason (at most 123 bytes): which streams, what to
+// do, and for tiers 4 and 5 how to get more.
+func (s *Server) tooManyText(session, kind string) string {
+	msg := "Too many video and audio streams open for this robot: stop one (or close another tab)."
+	if kind == "sensors" {
+		msg = "Too many live sensor streams open for this robot: stop one (or close another tab)."
+	}
+	if hint := s.tierHint(s.sessionTier(session, time.Now())); hint != "" && len(msg)+1+len(hint) <= 123 {
+		msg += " " + hint
+	}
+	return msg
+}
+
 // tooMany answers 429 with what was exceeded and, for tiers 4 and 5, how to get more.
 func (s *Server) tooMany(w http.ResponseWriter, session, what string) {
 	msg := what

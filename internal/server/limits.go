@@ -155,9 +155,13 @@ func (s *Server) clientIP(r *http.Request) string {
 // command budget per session, so one page (or a script) cannot tie up the server or flood a
 // robot.
 const (
-	maxSSEPerSession  = 8
-	maxSSEPerAddr     = 30
-	maxMediaPerAddr   = 20
+	maxSSEPerSession = 8
+	maxSSEPerAddr    = 30
+	maxMediaPerAddr  = 20
+	// Sensor streams (IMU, touch, light) per session and robot: apart from the tier's media limit.
+	maxSensorsPerRobot = 6
+	// The close code of a media socket refused for too many streams; its reason says which.
+	closeTooMany      = 4429
 	maxCommandBuckets = 10000
 	// Per session, by tier (tiers.go): commands per second and burst, media sockets per robot.
 )
