@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	"io/fs"
 	"mime"
 	"net"
@@ -94,8 +95,13 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 	private := known && !s.mayPairLocked(session, pc.robotID)
 	s.mu.Unlock()
 	if private {
-		authPage(w, http.StatusForbidden, "This robot is private",
-			`Only its owner can pair with it: <a href="/auth/login">sign in</a> with the account that added it.`)
+		next := "/auth/login?next=" + url.QueryEscape("/pair?code="+code)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprintf(w, `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">`+
+			`<title>This robot is private</title><body style="font-family:system-ui;padding:16px">`+
+			`<h1>This robot is private</h1><p>Only its owner can pair with it: <a href="%s">sign in</a> `+
+			`with the account that added it.</p><p><a href="/?signin=no">Open dashboard</a></p>`, html.EscapeString(next))
 		return
 	}
 

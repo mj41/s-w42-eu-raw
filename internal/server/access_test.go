@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -60,6 +61,16 @@ func TestPrivateRobotOnlyForItsOwner(t *testing.T) {
 	// Private by default: the code from its screen pairs nobody but its owner.
 	if got := anon.pair(code); got != http.StatusForbidden {
 		t.Fatalf("anonymous pairs a private robot: %d", got)
+	}
+	// The refusal links to signing in, back to this pairing.
+	resp, err := anon.c.Get(ts.URL + "/pair?signin=no&code=" + code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if want := `<a href="/auth/login?next=%2Fpair%3Fcode%3D` + code + `">sign in</a>`; !strings.Contains(string(body), want) {
+		t.Fatalf("no sign-in link %s in:\n%s", want, body)
 	}
 	if got := jan.pair(code); got != http.StatusForbidden {
 		t.Fatalf("another account pairs a private robot: %d", got)
