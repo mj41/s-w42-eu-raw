@@ -6,7 +6,7 @@ Relay between M5Stack Stackchan robots and web browsers for **Embody Mode**. It 
 - **Browser:** scans the robot's QR code to pair, then gets a live dashboard.
 - **Server:** one Go binary with the web page built in. State lives in memory and is saved to a JSON file, so pairings survive a restart.
 
-The robot side is the [Embody Mode app](https://github.com/mj41/StackChan/tree/embody-mj41/firmware/main/apps/app_embody_mode) in the StackChan firmware fork [mj41/StackChan](https://github.com/mj41/StackChan/tree/embody-mj41) (branch `embody-mj41`). **Setting up a robot** is the Stackchan manager's job ([s-w42-eu-manager](https://github.com/mj41/s-w42-eu-manager)): one button on its `/setup` page in Chrome installs the firmware and gives the robot the apps you approve, this one among them; your own firmware build: [SETUP.md](https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/SETUP.md).
+The robot side is the [Embody Mode app](https://github.com/mj41/StackChan/tree/embody-mj41/firmware/main/apps/app_embody_mode) in the StackChan firmware fork [mj41/StackChan](https://github.com/mj41/StackChan/tree/embody-mj41) (branch `embody-mj41`). **Setting up a robot** is the Stackchan manager's job ([s-w42-eu-manager](https://github.com/mj41/s-w42-eu-manager)), and optional: one button on its page in Chrome installs the firmware and gives the robot the apps you approve, this one among them; your own firmware build: [SETUP.md](https://github.com/mj41/StackChan/blob/embody-mj41/firmware/main/apps/app_embody_mode/SETUP.md).
 
 Part of [home-w42-eu](https://github.com/mj41/home-w42-eu), a local first, privacy first platform for a home: this repo holds the Go implementation of its device wire protocol (the `wire` package), which the other servers use too.
 
@@ -21,6 +21,18 @@ Part of [home-w42-eu](https://github.com/mj41/home-w42-eu), a local first, priva
 > **Want more?** Ask in the [issues](https://github.com/mj41/s-w42-eu-raw/issues), and ideally [sponsor mj41](https://github.com/sponsors/mj41) on GitHub:
 > mj41 codes for attention food.
 
+## How the pieces fit
+
+| Piece | What it is | Needed? |
+|---|---|---|
+| **Robot** | a Stackchan with the [Embody Mode firmware](https://github.com/mj41/StackChan/tree/embody-mj41/firmware/main/apps/app_embody_mode). On its screen the **app switcher** (the QR screen: Next, Connect) lists its apps and switches between them; its gear opens the **Manager screen** (which manager it has, turn it off or on). | yes |
+| **Apps** | servers the robot connects to, one at a time: Raw data (this repo), [Pet](https://github.com/mj41/s-w42-eu-pet), [Sbot](https://github.com/mj41/s-w42-eu-sbot), … | at least one |
+| **Phone or browser** | opens an app's page and pairs with the robot by scanning its QR code; with end-to-end encryption only paired browsers can read the robot | to use an app |
+| **Manager** | [s-w42-eu-manager](https://github.com/mj41/s-w42-eu-manager): the web service that sets robots up over USB, gives each robot its own token per app, and switches and changes apps from its page; on your own computer (the home manager) or online at [sm.w42.eu](https://sm.w42.eu), which a home manager may link to | optional: without it, apps are written over USB and switched on the robot's app switcher |
+
+"Manager" always means this web service; on the robot there is only the app switcher and the
+Manager screen that shows which manager it has.
+
 ## Dashboard
 
 For each paired robot:
@@ -34,10 +46,10 @@ For each paired robot:
 - **Screen:** stickers over the face (heart, angry, sweat, shy, dizzy), 12 emoji (smile, grin, laugh, wink, love, cool, surprised, thinking, sleepy, cry, sob, angry) sent as a full-screen picture, or a picture from the phone. The picture is scaled to 320x240 in the browser and replaces the face until "Face".
 - **Live touch** (under Sensors): both fingers on the screen, drawn live (50 Hz) from the raw touch controller data. Events `touch_down` / `touch_up` (with duration) come from the same data.
 - **Camera extras:** "Snapshot 640×480" (shown below the video, with a download link), Mirror / Flip, and raw sensor registers (read / write, answer in Events).
-- **Apps:** the robot's apps (from its managers), with **Switch** (the robot asks on its screen). Adding, removing and the start app are the robot's manager's job ([s-w42-eu-manager](https://github.com/mj41/s-w42-eu-manager)), never an app's.
+- **Apps:** the robot's apps (from its manager, or written over USB), with **Switch** (the robot asks on its screen). Adding, removing and the start app are the robot's manager's job ([s-w42-eu-manager](https://github.com/mj41/s-w42-eu-manager)), never an app's.
 - **Head extras:** Servo power on/off, and Rotate ⟲ / Stop / ⟳ (continuous yaw, Slow/Medium/Fast, 3/10/30 s; the robot asks on its own screen first).
 - **Live IMU** (under Sensors): raw accelerometer, gyro and magnetometer at 100 Hz while the button is on (the robot streams only while someone watches), with "Download CSV" of up to 60 s.
-- **Camera & mic:** live video (JPEG, about 5 fps; 320×240, or 640×480 for tiers 1–3; one size for all watchers) and the robot's microphone, played through Web Audio. The robot streams only while someone watches or listens, and shows a red LIVE badge meanwhile.
+- **Camera & mic:** live video (JPEG, about 5 fps; 320×240, or 640×480 for tiers 1–3; one size for all watchers) and the robot's microphone, played through Web Audio. The robot streams only while someone watches or listens, and shows a red LIVE badge meanwhile. Open video and audio streams per browser and robot are limited by tier (4, or 2 signed in without a higher tier, 1 signed out); live sensors (IMU, touch, light) have their own allowance of 6, so they never use up the video. A refused stream says why on the page.
 - **Speaker:** "Talk" (tap to start, tap again to stop) streams your microphone to the robot, "Play sound file" plays any audio file the browser can decode, and "Beep" is a test tone. Audio is resampled to 24 kHz in the browser and the robot's mouth moves while it plays. Browsers give the microphone only to secure pages: use `http://localhost` on the server machine, or run the server with `-tls-listen :8766` and open `https://<LAN IP>:8766` on the phone (the plain page links to it; accept the self-signed certificate warning once). Files and Beep work anywhere.
 - **Infrared:** point a TV remote at the robot and press a button: the last code shows up with "Send again" and "Save…" (a named button, kept in this browser). "NEC address / command" sends a code by hand (a received NEC code fills it in), and "Add to list" saves it under a name, so you can try a few commands side by side. "Tap / Hold 0.5–2 s" sets how long every send holds the button (default 0.5 s: frame plus repeat codes, like a real press). "Send 3×" sends the whole code three times, for when the robot's weak IR LED only sometimes gets through. "Test LED (3 s)" lights the IR LED long enough to see it through a phone camera; "Self-test" checks that the robot hears its own signal (carrier and timing).
 - **Power LED** (under LEDs): on, blink, fast, off, or "Charging" (the charger drives it).
