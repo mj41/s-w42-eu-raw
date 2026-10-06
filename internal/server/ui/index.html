@@ -1438,9 +1438,16 @@ function e2eStatus(c, r) {
   }
   c.e2eLine.hidden = !r.e2e;
   if (!r.e2e) return;
-  c.e2eLine.textContent = E2E.ready(r.id) ? "🔒 End-to-end encrypted: the server relays only ciphertext."
+  c.e2eLine.textContent = !window.isSecureContext
+    ? "🔒 This robot is end-to-end encrypted, and this page cannot decrypt (it is not HTTPS): open the HTTPS page" +
+      (c.httpsURL ? ` (${c.httpsURL})` : "") + " and scan the QR code on the robot's screen again."
+    : E2E.ready(r.id) ? "🔒 End-to-end encrypted: the server relays only ciphertext."
     : E2E.known(r.id) ? "🔒 End-to-end encrypted: unlocking…"
-    : "🔒 This robot is end-to-end encrypted: scan the QR code on its screen with this browser to see it.";
+    : "🔒 This robot is end-to-end encrypted: scan the QR code on its screen with this device to see its data (pairing through another browser does not bring the key).";
+  if (!window.isSecureContext && c.httpsURL === undefined) {
+    c.httpsURL = "";
+    serverInfo.then((i) => { if (i.https_url) { c.httpsURL = i.https_url; e2eStatus(c, r); } });
+  }
 }
 
 // Join requests (see server join.go): an unpaired browser asks, a paired one answers.

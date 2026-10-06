@@ -16,7 +16,9 @@ import (
 	"encoding/json"
 	"log/slog"
 	"maps"
+	"net"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -505,7 +507,7 @@ func (s *Server) issueCode(robotID string) wire.PairCodeBody {
 	s.mu.Unlock()
 	return wire.PairCodeBody{
 		Code:       code,
-		URL:        s.cfg.PublicURL + "/pair?code=" + code,
+		URL:        s.pairBase() + "/pair?code=" + code,
 		ExpiresInS: int(s.cfg.PairTTL / time.Second),
 	}
 }
@@ -651,4 +653,15 @@ func (s *Server) tellWatching(session string) {
 			}
 		}
 	}
+}
+
+// pairBase is where the robot's QR code sends a browser: the public URL, or, when that is plain
+// http and browsers are also served over HTTPS, the HTTPS address on the same host (end-to-end
+// encryption works only on a secure page: a phone that pairs over http could not enroll).
+func (s *Server) pairBase() string {
+	u, err := url.Parse(s.cfg.PublicURL)
+	if s.cfg.HTTPSPort == "" || err != nil || u.Scheme != "http" {
+		return s.cfg.PublicURL
+	}
+	return "https://" + net.JoinHostPort(u.Hostname(), s.cfg.HTTPSPort)
 }
