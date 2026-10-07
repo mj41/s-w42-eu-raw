@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,7 +24,7 @@ import (
 
 // HintCookie is set by the manager for its whole domain (e.g. w42.eu, -sign-in-hint-domain) when
 // a browser signs in there, and removed when it signs out: a random value, no credential. An app
-// on that domain sees it and tries a silent sign-in once per value (SilentHint), so a person who
+// on that domain sees it and tries a silent sign-in (SilentHint: once per value, again after RetryAfter), so a person who
 // signed in at the manager is signed in at the next page load, and others are never sent there.
 const HintCookie = "w42_signed_in"
 
@@ -173,21 +174,35 @@ func (c *Client) post(ctx context.Context, what string, body any, out any) error
 }
 
 // SilentHint is the hint to try a silent sign-in with now, or "": a page load of a browser not
-// signed in here, with the manager's hint cookie set and not tried yet (the app keeps the value it
-// tried in its cookie triedCookie; MarkTried).
+// signed in here, with the manager's hint cookie set, and not tried with that hint in the last
+// RetryAfter (the app keeps the hint and the time it tried in its cookie triedCookie;
+// MarkTried). The hint means the browser is signed in at the manager, so an app that has no
+// session for it (lost, or ended here) tries again, but never more often than that: when the
+// manager's sign-in is gone too, the try comes back without one and the page just shows.
 func SilentHint(r *http.Request, triedCookie string) string {
+	return silentHint(r, triedCookie, time.Now())
+}
+
+// RetryAfter is how long a silent sign-in tried with one hint is not tried again.
+const RetryAfter = 10 * time.Minute
+
+func silentHint(r *http.Request, triedCookie string, now time.Time) string {
 	hint, err := r.Cookie(HintCookie)
-	if err != nil || hint.Value == "" || len(hint.Value) > 64 {
+	if err != nil || hint.Value == "" || len(hint.Value) > 64 || strings.Contains(hint.Value, "|") {
 		return ""
 	}
-	if tried, err := r.Cookie(triedCookie); err == nil && tried.Value == hint.Value {
-		return ""
+	if tried, err := r.Cookie(triedCookie); err == nil {
+		value, at, _ := strings.Cut(tried.Value, "|")
+		sec, _ := strconv.ParseInt(at, 10, 64)
+		if value == hint.Value && now.Sub(time.Unix(sec, 0)) < RetryAfter {
+			return ""
+		}
 	}
 	return hint.Value
 }
 
-// MarkTried remembers in the app's own cookie that the silent sign-in was tried with this hint.
+// MarkTried remembers in the app's own cookie that the silent sign-in was tried with this hint, now.
 func MarkTried(w http.ResponseWriter, triedCookie, hint string, secure bool) {
-	http.SetCookie(w, &http.Cookie{Name: triedCookie, Value: hint, Path: "/", MaxAge: 30 * 24 * 3600,
+	http.SetCookie(w, &http.Cookie{Name: triedCookie, Value: hint + "|" + strconv.FormatInt(time.Now().Unix(), 10), Path: "/", MaxAge: 30 * 24 * 3600,
 		HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: secure})
 }
