@@ -99,7 +99,11 @@ func main() {
 	var state statestore.Store
 	if *stateDB != "" {
 		openCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute) // waits for another copy's lock
-		st, err := statestore.Open(openCtx, *stateDB, "raw", *stateFile)
+		var from *statestore.File
+		if *stateFile != "" {
+			from = &statestore.File{Path: *stateFile}
+		}
+		st, err := statestore.Open(openCtx, *stateDB, "raw", from)
 		cancel()
 		if err != nil {
 			log.Error("state database", "err", err)

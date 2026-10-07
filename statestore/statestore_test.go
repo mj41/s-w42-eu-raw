@@ -14,7 +14,7 @@ import (
 func TestFile(t *testing.T) {
 	ctx := context.Background()
 	p := filepath.Join(t.TempDir(), "sub", "state.json")
-	s, err := Open(ctx, p, "x", "")
+	s, err := Open(ctx, p, "x", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,6 +32,14 @@ func TestFile(t *testing.T) {
 	}
 	if s.Lost() != nil {
 		t.Fatal("a file is never lost")
+	}
+	fb := &File{Path: p, BlobDir: filepath.Join(filepath.Dir(p), "photos")}
+	if b, err := fb.Blob(ctx, "none.jpg"); b != nil || err != nil {
+		t.Fatalf("no blob: %v %v", b, err)
+	}
+	fb.PutBlob(ctx, "a.jpg", []byte("x"))
+	if names, _ := fb.BlobNames(ctx); len(names) != 1 {
+		t.Fatalf("blob names: %v", names)
 	}
 }
 
@@ -62,14 +70,27 @@ func TestPostgres(t *testing.T) {
 	app := "test-" + strings.ReplaceAll(t.Name(), "/", "-") + time.Now().Format("150405.000000")
 
 	// The move from a volume: the file's state goes in on the first open.
-	f := filepath.Join(t.TempDir(), "state.json")
-	os.WriteFile(f, []byte(`{"robots":{"r1":{"name":"Ema's robot"}},"n":1}`), 0o600)
+	dir := t.TempDir()
+	f := &File{Path: filepath.Join(dir, "state.json"), BlobDir: filepath.Join(dir, "photos")}
+	f.Save(ctx, []byte(`{"robots":{"r1":{"name":"Ema's robot"}},"n":1}`))
+	f.PutBlob(ctx, "r1-1.jpg", []byte{0xff, 0xd8, 1, 2})
 	s, err := Open(ctx, url, app, f)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if b, err := s.Load(ctx); err != nil || !sameJSON(t, b, []byte(`{"robots":{"r1":{"name":"Ema's robot"}},"n":1}`)) {
 		t.Fatalf("imported: %s %v", b, err)
+	}
+	if b, err := s.Blob(ctx, "r1-1.jpg"); err != nil || string(b) != string([]byte{0xff, 0xd8, 1, 2}) {
+		t.Fatalf("imported blob: %v %v", b, err)
+	}
+	if err := s.PutBlob(ctx, "../x", nil); err == nil {
+		t.Fatal("a blob name with a path")
+	}
+	s.PutBlob(ctx, "r1-2.jpg", []byte{9})
+	s.DeleteBlob(ctx, "r1-1.jpg")
+	if names, _ := s.BlobNames(ctx); len(names) != 1 || names[0] != "r1-2.jpg" {
+		t.Fatalf("blobs: %v", names)
 	}
 	for i := 2; i <= Keep+5; i++ {
 		if err := s.Save(ctx, []byte(`{"n":`+itoa(i)+`}`)); err != nil {
@@ -124,14 +145,14 @@ func TestPostgresLost(t *testing.T) {
 	PingEvery = 100 * time.Millisecond
 	defer func() { PingEvery = 10 * time.Second }()
 	app := "test-lost-" + time.Now().Format("150405.000000")
-	s, err := Open(ctx, url, app, "")
+	s, err := Open(ctx, url, app, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
 	pg := s.(*Postgres)
 	// Another session kills ours (as a restart of the server would).
-	other, err := Open(ctx, url, app+"-killer", "")
+	other, err := Open(ctx, url, app+"-killer", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +176,7 @@ func TestPostgresLost(t *testing.T) {
 }
 
 func TestRedact(t *testing.T) {
-	_, err := Open(context.Background(), "postgres://u:sekrit-pass@127.0.0.1:1/db?connect_timeout=1", "x", "")
+	_, err := Open(context.Background(), "postgres://u:sekrit-pass@127.0.0.1:1/db?connect_timeout=1", "x", nil)
 	if err == nil || strings.Contains(err.Error(), "sekrit-pass") {
 		t.Fatalf("error: %v", err)
 	}

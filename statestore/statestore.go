@@ -32,6 +32,21 @@ type Store interface {
 	Close() error
 	// Where says where the state is, for logs (no password).
 	Where() string
+
+	// Blobs: small named files that belong with the state (the pet's leaderboard photos): files
+	// in File.BlobDir at home, rows of the blobs table in Postgres. Blob returns nil for none.
+	PutBlob(ctx context.Context, name string, data []byte) error
+	Blob(ctx context.Context, name string) ([]byte, error)
+	DeleteBlob(ctx context.Context, name string) error
+	BlobNames(ctx context.Context) ([]string, error)
+}
+
+// validName: a blob name is a plain file name.
+func validName(name string) error {
+	if name == "" || name != filepath.Base(name) || strings.HasPrefix(name, ".") || len(name) > 200 {
+		return fmt.Errorf("statestore: bad blob name %q", name)
+	}
+	return nil
 }
 
 // IsDatabase: target is a Postgres URL rather than a file path.
@@ -42,8 +57,8 @@ func IsDatabase(target string) bool {
 // --- a file --------------------------------------------------------------------------------------
 
 // File is the state in one JSON file, written atomically and readable only by this user (it holds
-// session ids, which are credentials).
-type File struct{ Path string }
+// session ids, which are credentials), and its blobs as files in BlobDir ("" = none).
+type File struct{ Path, BlobDir string }
 
 func (f *File) Load(context.Context) ([]byte, error) {
 	b, err := os.ReadFile(f.Path)
@@ -54,7 +69,11 @@ func (f *File) Load(context.Context) ([]byte, error) {
 }
 
 func (f *File) Save(_ context.Context, doc []byte) error {
-	dir := filepath.Dir(f.Path)
+	return writeAtomic(f.Path, doc)
+}
+
+func writeAtomic(path string, doc []byte) error {
+	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -74,7 +93,65 @@ func (f *File) Save(_ context.Context, doc []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), f.Path)
+	return os.Rename(tmp.Name(), path)
+}
+
+func (f *File) blobPath(name string) (string, error) {
+	if f.BlobDir == "" {
+		return "", errors.New("statestore: no blob directory")
+	}
+	if err := validName(name); err != nil {
+		return "", err
+	}
+	return filepath.Join(f.BlobDir, name), nil
+}
+
+func (f *File) PutBlob(_ context.Context, name string, data []byte) error {
+	p, err := f.blobPath(name)
+	if err != nil {
+		return err
+	}
+	return writeAtomic(p, data)
+}
+
+func (f *File) Blob(_ context.Context, name string) ([]byte, error) {
+	p, err := f.blobPath(name)
+	if err != nil {
+		return nil, err
+	}
+	b, err := os.ReadFile(p)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	return b, err
+}
+
+func (f *File) DeleteBlob(_ context.Context, name string) error {
+	p, err := f.blobPath(name)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func (f *File) BlobNames(context.Context) ([]string, error) {
+	if f.BlobDir == "" {
+		return nil, nil
+	}
+	es, err := os.ReadDir(f.BlobDir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	var out []string
+	for _, e := range es {
+		if e.Type().IsRegular() && validName(e.Name()) == nil {
+			out = append(out, e.Name())
+		}
+	}
+	return out, err
 }
 
 func (f *File) Lost() <-chan struct{} { return nil }
@@ -95,6 +172,13 @@ CREATE TABLE IF NOT EXISTS state (
     doc      jsonb NOT NULL,
     saved_at timestamptz NOT NULL,
     version  bigint NOT NULL
+);
+CREATE TABLE IF NOT EXISTS blobs (
+    app      text NOT NULL,
+    name     text NOT NULL,
+    data     bytea NOT NULL,
+    saved_at timestamptz NOT NULL,
+    PRIMARY KEY (app, name)
 );
 CREATE TABLE IF NOT EXISTS state_history (
     app      text NOT NULL,
@@ -223,6 +307,45 @@ func (p *Postgres) Save(ctx context.Context, doc []byte) error {
 
 func (p *Postgres) Lost() <-chan struct{} { return p.lost }
 
+func (p *Postgres) PutBlob(ctx context.Context, name string, data []byte) error {
+	if err := validName(name); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.conn.Exec(ctx, `INSERT INTO blobs (app, name, data, saved_at) VALUES ($1, $2, $3, now())
+		ON CONFLICT (app, name) DO UPDATE SET data = EXCLUDED.data, saved_at = EXCLUDED.saved_at`, p.app, name, data)
+	return err
+}
+
+func (p *Postgres) Blob(ctx context.Context, name string) ([]byte, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var b []byte
+	err := p.conn.QueryRow(ctx, "SELECT data FROM blobs WHERE app = $1 AND name = $2", p.app, name).Scan(&b)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return b, err
+}
+
+func (p *Postgres) DeleteBlob(ctx context.Context, name string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	_, err := p.conn.Exec(ctx, "DELETE FROM blobs WHERE app = $1 AND name = $2", p.app, name)
+	return err
+}
+
+func (p *Postgres) BlobNames(ctx context.Context) ([]string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	rows, err := p.conn.Query(ctx, "SELECT name FROM blobs WHERE app = $1 ORDER BY name", p.app)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
 // pid is the server process of the connection (tests).
 func (p *Postgres) pid() uint32 {
 	p.mu.Lock()
@@ -246,37 +369,58 @@ func (p *Postgres) Close() error {
 	return p.conn.Close(ctx)
 }
 
-// Open is a file store for a path, or a Postgres store for a postgres:// URL. importFile, for a
-// database that has no state for app yet: that file's state is saved into it first (the move
-// from a volume), and left in place.
-func Open(ctx context.Context, target, app, importFile string) (Store, error) {
+// Open is the file store from (target = "" or a path), or a Postgres store for a postgres:// URL.
+// A database that has no state for app yet gets from's state and blobs first (the move from a
+// volume); from is left in place.
+func Open(ctx context.Context, target, app string, from *File) (Store, error) {
 	if !IsDatabase(target) {
-		return &File{Path: target}, nil
+		if from == nil {
+			return &File{Path: target}, nil
+		}
+		return from, nil
 	}
 	p, err := OpenPostgres(ctx, target, app)
 	if err != nil {
 		return nil, err
 	}
-	if importFile != "" {
-		have, err := p.Load(ctx)
-		if err != nil {
+	if from != nil && from.Path != "" {
+		if err := p.importFrom(ctx, from); err != nil {
 			p.Close()
 			return nil, err
 		}
-		if have == nil {
-			b, err := os.ReadFile(importFile)
-			switch {
-			case errors.Is(err, os.ErrNotExist): // nothing to move
-			case err != nil:
-				p.Close()
-				return nil, fmt.Errorf("statestore: import: %w", err)
-			default:
-				if err := p.Save(ctx, b); err != nil {
-					p.Close()
-					return nil, fmt.Errorf("statestore: import %s: %w", importFile, err)
-				}
-			}
-		}
 	}
 	return p, nil
+}
+
+// importFrom moves a file store's state and blobs into an empty database (blobs first: the
+// state refers to them).
+func (p *Postgres) importFrom(ctx context.Context, from *File) error {
+	have, err := p.Load(ctx)
+	if err != nil || have != nil {
+		return err
+	}
+	doc, err := from.Load(ctx)
+	if err != nil {
+		return fmt.Errorf("statestore: import %s: %w", from.Path, err)
+	}
+	if doc == nil {
+		return nil // nothing to move
+	}
+	names, err := from.BlobNames(ctx)
+	if err != nil {
+		return fmt.Errorf("statestore: import %s: %w", from.BlobDir, err)
+	}
+	for _, n := range names {
+		b, err := from.Blob(ctx, n)
+		if err != nil {
+			return fmt.Errorf("statestore: import %s: %w", n, err)
+		}
+		if err := p.PutBlob(ctx, n, b); err != nil {
+			return fmt.Errorf("statestore: import %s: %w", n, err)
+		}
+	}
+	if err := p.Save(ctx, doc); err != nil {
+		return fmt.Errorf("statestore: import %s: %w", from.Path, err)
+	}
+	return nil
 }
