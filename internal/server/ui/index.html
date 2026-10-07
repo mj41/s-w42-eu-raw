@@ -1071,6 +1071,13 @@ function makeCard(r) {
       reopen();
     };
     setInterval(() => {
+      // Off on the robot itself (its Manager screen, or USB): no app can turn them on.
+      if (c.robot && c.robot.telemetry && c.robot.telemetry.camera_mic_off > 0) {
+        info.textContent = "🔒 Camera and microphone are off on the robot" + (c.privacyReason ? ` (${c.privacyReason})` : "") +
+          ": only the robot's Manager screen or a USB setup turns them on.";
+        media.frames = media.bytes = 0;
+        return;
+      }
       if (media.ws && media.ws.readyState === WebSocket.OPEN) {
         const now = Date.now(), notes = [];
         if (media.video && now - media.lastVideoAt > 5000) notes.push(`no video for ${Math.round((now - media.lastVideoAt) / 1000)} s`);
@@ -1394,6 +1401,7 @@ function makeCard(r) {
     }
     if (ev.name === "rotate_asking" && Date.now() - Date.parse(ev.ts) < 10000) status.textContent = "Confirm on the robot's screen: tap Yes to turn the head";
     if (ev.name === "server_asking" && Date.now() - Date.parse(ev.ts) < 10000) status.textContent = "Confirm on the robot's screen: tap Yes to change its server";
+    if (ev.name === "privacy") c.privacyReason = (ev.data || {}).reason || ""; // the camera and mic, as set on the robot
     if (ev.name === "ir_received" && c.onIr) c.onIr(ev.data || {});
     if (ev.name === "nfc_tag" && c.onNfc) c.onNfc(ev.data || {});
     if (ev.name === "servers" && c.onServers) c.onServers(ev.data || {});

@@ -256,8 +256,11 @@ or text record, `nfc_removed` with `{"uid"}`, `proximity_near` / `proximity_far`
 (raw marks/spaces in µs, always present), `screen_long_press` with `{"x", "y"}` (free for
 apps), `servers` with `{"list": JSON array of {name, url, origin, token: bool}, "current",
 "default"}`, `power_button` with `{"press": "short" or "long"}`, `usb_plugged` /
-`usb_unplugged`, `battery_inserted` / `battery_removed`. Answers to commands are in the
-command table below.
+`usb_unplugged`, `battery_inserted` / `battery_removed`, `privacy` with `{"camera_mic": "on" or
+"off", "reason", "mode", "night"}` (the camera and microphone as set on the robot itself: its
+Manager screen or USB; telemetry `camera_mic_off` 0/1), `privacy_refused` with `{"command",
+"reason"}` (a `camera`, `mic` or `snapshot` while they are off there; the dashboard says so in
+Camera & mic). Answers to commands are in the command table below.
 
 ### Commands
 
