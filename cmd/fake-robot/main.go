@@ -43,6 +43,7 @@ func main() {
 		events    = flag.Duration("events", 20*time.Second, "interval of fake robot events (0 disables)")
 		e2eOn     = flag.Bool("e2e", false, "end-to-end encryption (home-w42-eu docs/e2ee.md): seal everything for enrolled browsers")
 		e2eState  = flag.String("e2e-state", "", "file for the robot key and enrolled browsers (default ~/.config/stackchan-server/<id>-e2e.json)")
+		camOff    = flag.Bool("camera-off", false, "camera and microphone off on the robot (its privacy setting): refused, reported")
 	)
 	flag.Parse()
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -55,7 +56,7 @@ func main() {
 	token := strings.TrimSpace(string(b))
 	url := strings.TrimRight(*serverURL, "/") + wire.ConnectPath
 
-	r := &robot{started: time.Now(), battery: 87, pitch: 45, brightness: 60, volume: 50, nfcOn: true, log: log}
+	r := &robot{started: time.Now(), battery: 87, pitch: 45, brightness: 60, volume: 50, nfcOn: true, log: log, camOff: *camOff}
 	if *e2eOn {
 		path := *e2eState
 		if path == "" {
@@ -100,6 +101,7 @@ type robot struct {
 	nfcOn               bool             // NFC polling, on by default like the firmware
 	screensaver         float64          // 0 off, 1 auto, 2 manual
 	afterStandby        bool             // report standby_end after the next connect
+	camOff              bool             // camera and microphone off on the robot (-camera-off)
 	servers             []map[string]any // like the firmware's server list (no switching here)
 	serverDefault       string
 	frame               int     // camera frames sent, drives the test pattern
@@ -169,6 +171,12 @@ func (r *robot) run(url, token, id string, interval, eventEvery time.Duration) e
 	}
 	if err := send(wire.KindRobotEvent, r.serversEvent(strings.TrimSuffix(url, wire.ConnectPath))); err != nil {
 		return err
+	}
+	if r.camOff { // as the firmware: its privacy setting after connecting
+		if err := send(wire.KindRobotEvent, wire.RobotEventBody{Name: "privacy", Data: map[string]any{"camera_mic": "off",
+			"reason": "off on the robot", "mode": "off", "night": "22:00-07:00"}}); err != nil {
+			return err
+		}
 	}
 	if r.afterStandby {
 		r.afterStandby, r.screensaver = false, 0
@@ -342,10 +350,16 @@ func (r *robot) handle(c received, send func(string, any) error) error {
 			return err
 		}
 		return send(wire.KindRobotEvent, r.assetsEvent())
-	case "camera":
-		r.cameraOn, _ = c.cmd.Args["on"].(bool)
-	case "mic":
-		r.micOn, _ = c.cmd.Args["on"].(bool)
+	case "camera", "mic":
+		on, _ := c.cmd.Args["on"].(bool)
+		if on && r.camOff {
+			return send(wire.KindRobotEvent, wire.RobotEventBody{Name: "privacy_refused", Data: map[string]any{"command": c.cmd.Command, "reason": "off on the robot"}})
+		}
+		if c.cmd.Command == "camera" {
+			r.cameraOn = on
+		} else {
+			r.micOn = on
+		}
 	case "nfc":
 		r.nfcOn, _ = c.cmd.Args["on"].(bool)
 	case "brightness":
@@ -394,6 +408,7 @@ func (r *robot) telemetry() map[string]float64 {
 		"wifi_rssi_dbm":  float64(-55 - rand.IntN(10)),
 		"free_heap_kb":   float64(180 + rand.IntN(20)),
 		"uptime_s":       float64(int(time.Since(r.started).Seconds())),
+		"camera_mic_off": map[bool]float64{true: 1}[r.camOff],
 		"brightness_pct": r.brightness,
 		"volume_pct":     r.volume,
 		"screensaver":    r.screensaver,

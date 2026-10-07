@@ -242,7 +242,7 @@ const TELEMETRY_LABELS = {
   battery_pct: ["Battery", "%"], charging: ["Charging", ""], head_yaw_deg: ["Head yaw", "°"],
   head_pitch_deg: ["Head pitch", "°"], wifi_rssi_dbm: ["Wi-Fi", " dBm"], free_heap_kb: ["Free memory", " kB"],
   uptime_s: ["Uptime", " s"], brightness_pct: ["Brightness", "%"], volume_pct: ["Volume", "%"],
-  screensaver: ["Screensaver", ""], hold_s: ["Head hold", " s left"],
+  screensaver: ["Screensaver", ""], hold_s: ["Head hold", " s left"], camera_mic_off: ["Camera & mic", ""],
 };
 // Shown in their own table, in this order.
 const SENSOR_LABELS = {
@@ -970,13 +970,14 @@ function makeCard(r) {
       [["320x240", "320×240"], ["640x480", "640×480"]].map(([v, t]) => el("option", { value: v, textContent: t, className: v === "640x480" ? "full-video" : "" })));
     if (document.body.dataset.noFullVideo) vsize.options[1].disabled = true; // a robot shown after /api/me answered
     const listen = el("button", { className: "soft", textContent: "Listen" });
-
+    for (const e of [watch, vsize, listen]) e.dataset.privacy = "1"; // greyed while off on the robot
     // Audio message: uint16 LE sample rate, then s16le mono PCM.
     // Audio: 0x02 = rate + mono PCM; 0x04 = rate + channel count + interleaved PCM of
     // all codec channels: 1 is the microphone, 0 the speaker reference (what the robot
     // plays, looped back for echo cancellation). Pick which one to hear.
     const chanSel = el("select", { className: "select", ariaLabel: "Microphone channel", hidden: true },
       [["1", "Microphone"], ["0", "Speaker reference"]].map(([v, t]) => el("option", { value: v, textContent: t })));
+    chanSel.dataset.privacy = "1";
     const playPcm = (u8, channels = 1, header = 2) => {
       const rate = u8[0] | (u8[1] << 8);
       const pcm = new Int16Array(u8.slice(header).buffer);  // copy: Int16Array needs 2-byte alignment
@@ -1073,7 +1074,8 @@ function makeCard(r) {
     setInterval(() => {
       // Off on the robot itself (its Manager screen, or USB): no app can turn them on.
       if (c.robot && c.robot.telemetry && c.robot.telemetry.camera_mic_off > 0) {
-        info.textContent = "🔒 Camera and microphone are off on the robot" + (c.privacyReason ? ` (${c.privacyReason})` : "") +
+        if (media.video || media.audio) { media.video = media.audio = false; reopen(); } // the robot stopped them
+        info.textContent = "🔒 Camera and microphone are off on the robot" + (c.privacyReason && c.privacyReason !== "off on the robot" ? ` (${c.privacyReason})` : "") +
           ": only the robot's Manager screen or a USB setup turns them on.";
         media.frames = media.bytes = 0;
         return;
@@ -1132,8 +1134,10 @@ function makeCard(r) {
         }
         run("snapshot", {}, "snapshot (takes a second)");
       };
+      const snapBtn = el("button", { className: "soft", textContent: "Snapshot 640×480", onclick: snapshot });
+      snapBtn.dataset.privacy = "1";
       sections.push(el("div", { className: "row", style: "margin-top:8px" }, [
-        el("button", { className: "soft", textContent: "Snapshot 640×480", onclick: snapshot }), link,
+        snapBtn, link,
       ]), shot);
     }
     if (has("camera_config")) {
@@ -1362,6 +1366,7 @@ function makeCard(r) {
     c.table.replaceChildren(...(keys.length ? keys.map((k) => {
       const [label, unit] = TELEMETRY_LABELS[k] || [k, ""];
       const v = k === "charging" ? (r.telemetry[k] ? "yes" : "no")
+        : k === "camera_mic_off" ? (r.telemetry[k] ? "off on the robot" : "allowed")
         : k === "screensaver" ? (["off", "auto", "manual"][r.telemetry[k]] || r.telemetry[k])
         : r.telemetry[k] + unit;
       return el("tr", {}, [el("td", { textContent: label }), el("td", { textContent: v })]);
@@ -1377,7 +1382,13 @@ function makeCard(r) {
         s.value.textContent = reported + s.unit;
       }
     }
-    [c.root, c.filesView].filter(Boolean).forEach((root) => root.querySelectorAll("button, input, select").forEach((e) => { e.disabled = !r.online || e.dataset.alwaysDisabled === "1"; }));
+    // Camera and microphone controls are also off while they are off on the robot itself (privacy).
+    const camOff = !!(r.telemetry && r.telemetry.camera_mic_off > 0);
+    [c.root, c.filesView].filter(Boolean).forEach((root) => root.querySelectorAll("button, input, select").forEach((e) => {
+      const blocked = camOff && e.dataset.privacy === "1";
+      e.disabled = !r.online || e.dataset.alwaysDisabled === "1" || blocked;
+      if (e.dataset.privacy === "1") e.title = blocked ? "Camera and microphone are off on the robot: only its Manager screen or a USB setup turns them on" : "";
+    }));
     if (c.pingBtn) c.pingBtn.disabled = !r.online || c.pinging;
   };
   c.addEvent = (ev) => {
@@ -1401,7 +1412,11 @@ function makeCard(r) {
     }
     if (ev.name === "rotate_asking" && Date.now() - Date.parse(ev.ts) < 10000) status.textContent = "Confirm on the robot's screen: tap Yes to turn the head";
     if (ev.name === "server_asking" && Date.now() - Date.parse(ev.ts) < 10000) status.textContent = "Confirm on the robot's screen: tap Yes to change its server";
-    if (ev.name === "privacy") c.privacyReason = (ev.data || {}).reason || ""; // the camera and mic, as set on the robot
+    if (ev.name === "privacy") { // the camera and mic, as set on the robot
+      c.privacyReason = (ev.data || {}).reason || "";
+      c.privacyMode = (ev.data || {}).mode === "night" ? "off at night, " + (ev.data || {}).night : (ev.data || {}).mode || "";
+      if (c.robot) privacyStatus(c, c.robot);
+    }
     if (ev.name === "ir_received" && c.onIr) c.onIr(ev.data || {});
     if (ev.name === "nfc_tag" && c.onNfc) c.onNfc(ev.data || {});
     if (ev.name === "servers" && c.onServers) c.onServers(ev.data || {});
@@ -1477,7 +1492,22 @@ function upsert(r) {
   c.robot = r;
   c.update(r);
   e2eStatus(c, r);
+  privacyStatus(c, r);
   empty.hidden = cards.size > 0;
+}
+
+// privacyStatus shows the camera and microphone as set on the robot itself (its Manager screen or
+// USB): off now (telemetry camera_mic_off), or a mode other than on (event privacy).
+function privacyStatus(c, r) {
+  if (!c.privacyLine) {
+    c.privacyLine = el("p", { className: "muted" });
+    c.root.insertBefore(c.privacyLine, c.root.children[1] || null);
+  }
+  const off = !!(r.telemetry && r.telemetry.camera_mic_off > 0);
+  c.privacyLine.hidden = !off && !(c.privacyMode && c.privacyMode !== "on");
+  c.privacyLine.textContent = off
+    ? "📷 Camera and microphone are off on the robot" + (c.privacyReason && c.privacyReason !== "off on the robot" ? ` (${c.privacyReason})` : "") + ": only its Manager screen or a USB setup turns them on."
+    : `📷 Camera and microphone: ${c.privacyMode} (set on the robot).`;
 }
 
 // e2eStatus shows whether this browser can read an encrypted robot.

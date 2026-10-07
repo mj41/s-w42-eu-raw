@@ -259,8 +259,9 @@ apps), `servers` with `{"list": JSON array of {name, url, origin, token: bool}, 
 `usb_unplugged`, `battery_inserted` / `battery_removed`, `privacy` with `{"camera_mic": "on" or
 "off", "reason", "mode", "night"}` (the camera and microphone as set on the robot itself: its
 Manager screen or USB; telemetry `camera_mic_off` 0/1), `privacy_refused` with `{"command",
-"reason"}` (a `camera`, `mic` or `snapshot` while they are off there; the dashboard says so in
-Camera & mic). Answers to commands are in the command table below.
+"reason"}` (a `camera`, `mic` or `snapshot` while they are off there). The dashboard shows it
+at the top of the robot ("📷 Camera and microphone are off on the robot"), greys out Watch,
+Listen and Snapshot, and says why in Camera & mic. `fake-robot -camera-off` acts so. Answers to commands are in the command table below.
 
 ### Commands
 
