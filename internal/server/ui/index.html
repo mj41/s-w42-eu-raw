@@ -136,14 +136,15 @@ function e2eAttach(ws, robotId) {
   let handler = null;
   Object.defineProperty(ws, "onmessage", { get: () => handler, set: (fn) => { handler = fn; } });
   ws.addEventListener("message", async (ev) => {
-    if (!handler) return;
     const u8 = new Uint8Array(ev.data);
     if (u8[0] === 0x30) {
       const inner = await E2E.openBinary(robotId, u8);
-      if (inner) handler({ data: inner.buffer.slice(inner.byteOffset, inner.byteOffset + inner.byteLength) });
+      // A snapshot (0x07) comes sealed on whichever media socket is open: the server cannot keep it.
+      if (inner && inner[0] === 0x07) { cards.get(robotId)?.showSnapshot?.(inner.slice(1)); return; }
+      if (inner && handler) handler({ data: inner.buffer.slice(inner.byteOffset, inner.byteOffset + inner.byteLength) });
       return;
     }
-    handler(ev);
+    if (handler) handler(ev);
   });
   const send = ws.send.bind(ws);
   ws.send = (data) => {
@@ -1097,8 +1098,35 @@ function makeCard(r) {
         link.hidden = false;
         say(`Snapshot ${Math.round(e.bytes / 1024)} KB`);
       };
+      // An encrypted robot's snapshot is opened here, in the browser (e2eAttach): never on the server.
+      let lastShot = "";
+      c.showSnapshot = (jpeg) => {
+        const url = URL.createObjectURL(new Blob([jpeg], { type: "image/jpeg" }));
+        if (lastShot) URL.revokeObjectURL(lastShot);
+        lastShot = shot.src = link.href = url;
+        shot.hidden = link.hidden = false;
+        link.download = `${c.id}-${new Date().toISOString().replace(/[:.]/g, "-")}.jpg`;
+        say(`Snapshot ${Math.round(jpeg.length / 1024)} KB (end-to-end encrypted)`);
+      };
+      // The sealed still needs a media socket open to come through: a quiet one (no video, no
+      // audio) while a snapshot is on its way, closed a while after.
+      const quiet = { ws: null, timer: 0 };
+      const snapshot = async () => {
+        if (c.robot && c.robot.e2e) {
+          clearTimeout(quiet.timer);
+          if (!quiet.ws || quiet.ws.readyState > WebSocket.OPEN) {
+            const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/robots/${encodeURIComponent(c.id)}/media?video=0&audio=0`);
+            ws.binaryType = "arraybuffer";
+            e2eAttach(ws, c.id);
+            quiet.ws = ws;
+            await new Promise((ok) => { ws.addEventListener("open", ok, { once: true }); ws.addEventListener("close", ok, { once: true }); });
+          }
+          quiet.timer = setTimeout(() => { quiet.ws?.close(); quiet.ws = null; }, 20000);
+        }
+        run("snapshot", {}, "snapshot (takes a second)");
+      };
       sections.push(el("div", { className: "row", style: "margin-top:8px" }, [
-        el("button", { className: "soft", textContent: "Snapshot 640×480", onclick: () => run("snapshot", {}, "snapshot (takes a second)") }), link,
+        el("button", { className: "soft", textContent: "Snapshot 640×480", onclick: snapshot }), link,
       ]), shot);
     }
     if (has("camera_config")) {
