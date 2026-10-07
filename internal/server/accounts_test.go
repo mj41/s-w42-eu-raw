@@ -94,6 +94,7 @@ type fakeManager struct {
 	codes   map[string]sso.Account // one-time codes
 	handles map[string]sso.Account // handles of sign-ins that are on
 	logouts int
+	noCache bool // answers say "do not keep" (cache_s 0): every check asks
 }
 
 type fakeManaged struct {
@@ -159,7 +160,11 @@ func newFakeManager(t *testing.T) *fakeManager {
 			}
 			h := "handle-" + req.Code
 			m.handles[h] = a
-			json.NewEncoder(w).Encode(sso.Answer{OK: true, Handle: h, Account: &a, CacheS: 60})
+			cacheS := 60
+			if m.noCache {
+				cacheS = 0
+			}
+			json.NewEncoder(w).Encode(sso.Answer{OK: true, Handle: h, Account: &a, CacheS: cacheS})
 		case "/api/sso/check":
 			a, ok := m.handles[req.Handle]
 			json.NewEncoder(w).Encode(sso.Answer{OK: ok, Handle: req.Handle, Account: &a})
@@ -182,7 +187,7 @@ func (m *fakeManager) signOutEverywhere() {
 	m.handles = map[string]sso.Account{}
 }
 
-// set gives a robot a token for this app, owned by owner (an account key: issuer|subject).
+// set gives a robot a token for this app, owned by owner (an account key: the manager's user id).
 func (m *fakeManager) set(id, token, owner string, public bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

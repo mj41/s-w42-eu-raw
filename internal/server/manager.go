@@ -40,6 +40,11 @@ func (s *Server) reportSeen(ctx context.Context, c *robotConn) {
 	if err != nil || !auth.OK {
 		return
 	}
+	s.mu.Lock() // a new owner (two users joined at the manager) or public: now, not at its next connect
+	if inv, ok := s.owned[c.id]; auth.Owner != "" && (!ok || inv.Owner != auth.Owner || inv.OwnerName != auth.OwnerName || s.public[c.id] != auth.Public) {
+		s.managedRobotLocked(c.id, auth)
+	}
+	s.mu.Unlock()
 	s.unpair(c.id, auth.Unpair)
 }
 

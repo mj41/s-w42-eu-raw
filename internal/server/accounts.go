@@ -31,9 +31,9 @@ const (
 	signInCheckEvery        = time.Minute
 )
 
-// Account is a signed-in person, as the manager knows them (sso.Account): Key is stable and the
-// same in every app; Email only when the provider verified it; Provider, ProviderID and Login
-// are for tiers (tiers.go).
+// Account is a signed-in person, as the manager knows them (sso.Account): Key (the manager's user
+// id) is the same in every app and refreshed at each check (checkSignIns); Email only when the
+// provider verified it; Provider, ProviderID and Login are for tiers (tiers.go).
 type Account = sso.Account
 
 // ownedInvite is a robot an account added: the SHA-256 of its token, never the token.
@@ -194,9 +194,20 @@ func (s *Server) checkSignIns(ctx context.Context) {
 	}
 	s.mu.Unlock()
 	for session, h := range handles {
-		on, err := s.sso.Check(ctx, h)
+		acct, on, err := s.sso.Check(ctx, h)
 		if err != nil {
 			s.log.Warn("sign-in check", "err", err)
+		}
+		if on && acct != nil && acct.Key != "" {
+			s.mu.Lock()
+			if cur, ok := s.logins[session]; ok && s.handles[session] == h && cur != *acct {
+				s.logins[session] = *acct // e.g. the manager joined two sign-ins into one user
+				if cur.Key != acct.Key {
+					s.pairOwnedLocked(session, *acct)
+				}
+				s.requestSave()
+			}
+			s.mu.Unlock()
 		}
 		if !on {
 			s.mu.Lock()

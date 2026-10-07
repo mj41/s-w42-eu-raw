@@ -34,8 +34,8 @@ const (
 	maxKeys = 10000
 )
 
-// Account is the signed-in person, as the manager knows them. Key (issuer|subject) is stable
-// and the same in every app; Email is there only when the provider verified it; Provider is
+// Account is the signed-in person, as the manager knows them. Key (the manager's user id, which
+// may have several sign-ins) is the same in every app; Email is there only when the provider verified it; Provider is
 // the upstream sign-in (Dex's connector id: "github", "google").
 type Account struct {
 	Key        string `json:"key"`
@@ -56,6 +56,7 @@ type Answer struct {
 
 type cached struct {
 	ok            bool
+	acct          *Account // as the manager said last
 	fresh, usable time.Time
 }
 
@@ -98,28 +99,29 @@ func (c *Client) Exchange(ctx context.Context, code string) (Answer, error) {
 		return Answer{}, fmt.Errorf("manager: incomplete answer")
 	}
 	if a.OK {
-		c.remember(a.Handle, true, a.CacheS)
+		c.remember(a.Handle, true, a.Account, a.CacheS)
 	}
 	return a, nil
 }
 
-// Check tells whether the sign-in behind handle is still on (answers are cached as the manager
-// says). When the manager cannot be reached, a sign-in it confirmed within the last hour counts
-// as on, and err says why it was not asked.
-func (c *Client) Check(ctx context.Context, handle string) (bool, error) {
+// Check tells whether the sign-in behind handle is still on, with its account as the manager
+// knows it now (it changes: a person's sign-ins joined into one user get that user's Key). Answers
+// are cached as the manager says. When the manager cannot be reached, a sign-in it confirmed within
+// the last hour counts as on, and err says why it was not asked. The account may be nil.
+func (c *Client) Check(ctx context.Context, handle string) (*Account, bool, error) {
 	now := time.Now()
 	c.mu.Lock()
 	prev, found := c.cache[handle]
 	c.mu.Unlock()
 	if found && now.Before(prev.fresh) {
-		return prev.ok, nil
+		return prev.acct, prev.ok, nil
 	}
 	var a Answer
 	if err := c.post(ctx, "check", map[string]string{"handle": handle}, &a); err != nil {
-		return found && prev.ok && now.Before(prev.usable), err
+		return prev.acct, found && prev.ok && now.Before(prev.usable), err
 	}
-	c.remember(handle, a.OK, a.CacheS)
-	return a.OK, nil
+	c.remember(handle, a.OK, a.Account, a.CacheS)
+	return a.Account, a.OK, nil
 }
 
 // Logout ends the sign-in at the manager, and so in every app.
@@ -130,7 +132,7 @@ func (c *Client) Logout(ctx context.Context, handle string) error {
 	return c.post(ctx, "logout", map[string]string{"handle": handle}, nil)
 }
 
-func (c *Client) remember(handle string, ok bool, cacheS int) {
+func (c *Client) remember(handle string, ok bool, acct *Account, cacheS int) {
 	now := time.Now()
 	keep := time.Duration(cacheS) * time.Second
 	if !ok {
@@ -145,7 +147,7 @@ func (c *Client) remember(handle string, ok bool, cacheS int) {
 	if !ok {
 		usable = now
 	}
-	c.cache[handle] = cached{ok: ok, fresh: now.Add(keep), usable: usable}
+	c.cache[handle] = cached{ok: ok, acct: acct, fresh: now.Add(keep), usable: usable}
 }
 
 func (c *Client) post(ctx context.Context, what string, body any, out any) error {

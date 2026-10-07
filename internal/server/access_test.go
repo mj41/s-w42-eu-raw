@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -125,5 +126,57 @@ func TestAnonymousCannotAskToJoin(t *testing.T) {
 	anon := newUser(t, ts.URL)
 	if code, _ := anon.do("POST", "/api/join", "", true); code != http.StatusUnauthorized {
 		t.Fatalf("anonymous join request: %d", code)
+	}
+}
+
+// The manager joins a person's sign-ins into one user: the robots' owner and the signed-in
+// sessions get the user's id. Raw follows at its next checks, without signing in again.
+func TestOwnerJoinedAtTheManager(t *testing.T) {
+	f := newFakeManager(t)
+	f.noCache = true
+	ts, s, m := newManagedServer(t, f, "")
+	ema := newUser(t, ts.URL)
+	ema.signIn(f, "ema-google", "ema@example.com", "Ema") // the sign-in the robot's owner is not
+
+	const id = "stackchan-0a1b2c3d4e50"
+	m.set(id, "tok", "u-ema", false) // the manager's user, who added the robot with GitHub
+	_, code := robotWithCode(t, ts, "tok", id)
+	if got := ema.pair(code); got != http.StatusForbidden {
+		t.Fatalf("before the join, a private robot pairs another key: %d", got)
+	}
+
+	// The manager joined the sign-ins: its check answers with the user's id.
+	f.mu.Lock()
+	for h, a := range f.handles {
+		a.Key = "u-ema"
+		f.handles[h] = a
+	}
+	f.mu.Unlock()
+	s.checkSignIns(context.Background())
+	s.mu.Lock()
+	var keys []string
+	for _, a := range s.logins {
+		keys = append(keys, a.Key)
+	}
+	s.mu.Unlock()
+	if len(keys) != 1 || keys[0] != "u-ema" {
+		t.Fatalf("sessions after the check: %v", keys)
+	}
+	if got := ema.pairedIDs(); got != id {
+		t.Fatalf("the owner's session is not paired with her robot: %q", got)
+	}
+
+	// A new owner from the manager (another join) reaches raw with the next report, not only at
+	// the robot's next connect.
+	m.set(id, "tok", "u-other", false)
+	s.mu.Lock()
+	conn := s.robots[id].conn
+	s.mu.Unlock()
+	s.reportSeen(context.Background(), conn)
+	s.mu.Lock()
+	owner := s.owned[id].Owner
+	s.mu.Unlock()
+	if owner != "u-other" {
+		t.Fatalf("raw's owner after the report: %q", owner)
 	}
 }
