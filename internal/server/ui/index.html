@@ -127,8 +127,16 @@
 let managerURL = ""; // the robots' manager (sm.w42.eu, or a home's own), from /api/me
 // End-to-end encryption (e2e.js; home-w42-eu docs/e2ee.md). A pairing redirect may carry the
 // robot's key and pairing secret in the fragment, which the server never saw.
+// A private robot's owner signs in first: its refusal page kept the fragment in this tab (the
+// sign-in's redirects lose it), used here within 10 minutes.
 const pairedParam = new URLSearchParams(location.search).get("paired");
-if (pairedParam && location.hash.startsWith("#e2e=")) E2E.takeFragment(pairedParam);
+let pairHash = location.hash;
+try {
+  const kept = JSON.parse(sessionStorage.getItem("e2e-pair") || "null");
+  sessionStorage.removeItem("e2e-pair");
+  if (pairedParam && !pairHash.startsWith("#e2e=") && kept && Date.now() - kept.at < 10 * 60 * 1000) pairHash = kept.hash;
+} catch (e) {}
+if (pairedParam && pairHash.startsWith("#e2e=")) E2E.takeFragment(pairedParam, pairHash);
 
 // e2eAttach makes a media socket speak to an encrypted robot: 0x30 messages are opened and
 // passed on as the plaintext message they carry; speaker audio (0x03) goes sealed as 0x31.

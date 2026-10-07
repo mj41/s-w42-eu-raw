@@ -101,7 +101,11 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">`+
 			`<title>This robot is private</title><body style="font-family:system-ui;padding:16px">`+
 			`<h1>This robot is private</h1><p>Only its owner can pair with it: <a href="%s">sign in</a> `+
-			`with the account that added it.</p><p><a href="/?signin=no">Open dashboard</a></p>`, html.EscapeString(next))
+			`with the account that added it.</p><p><a href="/?signin=no">Open dashboard</a></p>`+
+			// An encrypted robot's QR code carries its key in the fragment (#e2e=…), which a
+			// sign-in's redirects lose: the dashboard takes it from this tab after pairing.
+			`<script>try{if(location.hash.startsWith("#e2e="))sessionStorage.setItem("e2e-pair",JSON.stringify({hash:location.hash,at:Date.now()}))}catch(e){}</script>`,
+			html.EscapeString(next))
 		return
 	}
 

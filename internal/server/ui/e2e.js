@@ -124,9 +124,9 @@ const E2E = (() => {
 
     // The pairing URL's fragment (#e2e=1.<R_pub>.<P>): never sent to the server. Take it and
     // remove it from the address bar.
-    takeFragment(robotId) {
-      const m = /^#e2e=1\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/.exec(location.hash);
-      history.replaceState(null, "", location.pathname + location.search);
+    takeFragment(robotId, hash = location.hash) {
+      const m = /^#e2e=1\.([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]+)$/.exec(hash);
+      if (location.hash) history.replaceState(null, "", location.pathname + location.search);
       if (!m) return false;
       pending = { id: robotId, rPub: b64u.dec(m[1]), p: b64u.dec(m[2]) };
       return true;

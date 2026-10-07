@@ -72,6 +72,9 @@ func TestPrivateRobotOnlyForItsOwner(t *testing.T) {
 	if want := `<a href="/auth/login?next=%2Fpair%3Fcode%3D` + code + `">sign in</a>`; !strings.Contains(string(body), want) {
 		t.Fatalf("no sign-in link %s in:\n%s", want, body)
 	}
+	if !strings.Contains(string(body), `sessionStorage.setItem("e2e-pair"`) {
+		t.Fatalf("the refusal does not keep an encrypted robot's fragment for after the sign-in:\n%s", body)
+	}
 	if got := jan.pair(code); got != http.StatusForbidden {
 		t.Fatalf("another account pairs a private robot: %d", got)
 	}
