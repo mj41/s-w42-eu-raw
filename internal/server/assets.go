@@ -49,13 +49,17 @@ func (s *Server) handleAssetUpload(w http.ResponseWriter, r *http.Request) {
 	st := s.robots[id]
 	var conn *robotConn
 	var commands []string
+	encrypted := false
 	if st != nil {
-		conn, commands = st.conn, st.caps.Commands
+		conn, commands, encrypted = st.conn, st.caps.Commands, st.labels["e2e"] == "1"
 	}
 	s.mu.Unlock()
 	switch {
 	case !paired || st == nil:
 		http.Error(w, "robot not paired with this browser", http.StatusForbidden)
+		return
+	case encrypted:
+		http.Error(w, e2eNoBinary, http.StatusConflict)
 		return
 	case !slices.Contains(commands, "assets"):
 		http.Error(w, "this robot has no file store (update its firmware)", http.StatusBadRequest)

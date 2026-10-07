@@ -249,6 +249,10 @@ func (s *Server) handleMedia(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// e2eNoBinary: an encrypted robot refuses plaintext pictures and files from the relay (it could
+// inject them); sealed ones come later (home-w42-eu docs/e2ee.md §7).
+const e2eNoBinary = "this robot is end-to-end encrypted: pictures and files to it are not available yet"
+
 // handlePicture sends a JPEG (scaled to 320x240 by the browser) to a paired
 // robot, which shows it instead of the face until the "face" command.
 func (s *Server) handlePicture(w http.ResponseWriter, r *http.Request) {
@@ -272,15 +276,19 @@ func (s *Server) handlePicture(w http.ResponseWriter, r *http.Request) {
 	paired := s.sessions[session][id]
 	st := s.robots[id]
 	var conn *robotConn
-	var supported bool
+	var supported, encrypted bool
 	if st != nil {
 		conn = st.conn
 		supported = slices.Contains(st.caps.Commands, "image")
+		encrypted = st.labels["e2e"] == "1"
 	}
 	s.mu.Unlock()
 	switch {
 	case !paired || st == nil:
 		http.Error(w, "robot not paired with this browser", http.StatusForbidden)
+		return
+	case encrypted:
+		http.Error(w, e2eNoBinary, http.StatusConflict)
 		return
 	case !supported:
 		http.Error(w, "robot does not show pictures", http.StatusBadRequest)

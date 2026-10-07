@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -215,5 +216,35 @@ func TestE2ERelay(t *testing.T) {
 	}
 	if code := postE2E(t, browser, url, wire.KindRobotCommand, map[string]any{"command": "nod"}); code != http.StatusBadRequest {
 		t.Fatalf("plain kind through the e2e endpoint: %d", code)
+	}
+}
+
+// An encrypted robot would drop a plaintext picture or file from the relay: the relay refuses it
+// at once, with the reason.
+func TestE2ENoPlaintextPictures(t *testing.T) {
+	ts, _ := newTestServer(t)
+	ws, _, err := dialRobot(ts, testToken, "chan-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ws.Close() })
+	robot := &testRobot{t: t, ws: ws}
+	robot.send(wire.KindRegister, wire.RegisterBody{Class: wire.ClassRobot, Labels: map[string]string{"e2e": "1"},
+		Capabilities: wire.RobotCapabilities{Model: "test", Commands: []string{"image", "assets"}}})
+	browser := pairBrowser(t, robot)
+	for _, path := range []string{"/picture", "/assets?name=a.png"} {
+		req, _ := http.NewRequest("POST", ts.URL+"/api/robots/chan-1"+path, strings.NewReader("\xff\xd8 jpeg"))
+		req.Header.Set("Origin", ts.URL)
+		req.Header.Set("X-Stackchan-Upload", "1")
+		req.Header.Set("Content-Type", map[bool]string{true: "image/jpeg", false: "application/octet-stream"}[path == "/picture"])
+		resp, err := browser.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusConflict || !strings.Contains(string(body), "end-to-end encrypted") {
+			t.Errorf("%s: %d %s", path, resp.StatusCode, body)
+		}
 	}
 }
