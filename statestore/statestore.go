@@ -166,6 +166,12 @@ const Keep = 50
 // PingEvery is how often the connection (and so the lock) is checked.
 var PingEvery = 10 * time.Second
 
+// ConnectRetryFirst and ConnectRetryMax: the waits between connection attempts at start.
+var (
+	ConnectRetryFirst = time.Second
+	ConnectRetryMax   = 10 * time.Second
+)
+
 const schema = `
 CREATE TABLE IF NOT EXISTS state (
     app      text PRIMARY KEY,
@@ -208,9 +214,18 @@ func OpenPostgres(ctx context.Context, url, app string) (*Postgres, error) {
 	if err != nil {
 		return nil, fmt.Errorf("statestore: %w", redact(err, url))
 	}
-	conn, err := pgx.ConnectConfig(ctx, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("statestore: connect %s@%s/%s: %w", cfg.User, cfg.Host, cfg.Database, redact(err, url))
+	// The database may be down for a moment (a restart): try again, waiting longer each time, until
+	// ctx ends, rather than exit and leave the app in a restart loop.
+	var conn *pgx.Conn
+	for wait := ConnectRetryFirst; ; wait = min(wait*2, ConnectRetryMax) {
+		if conn, err = pgx.ConnectConfig(ctx, cfg); err == nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("statestore: connect %s@%s/%s: %w", cfg.User, cfg.Host, cfg.Database, redact(err, url))
+		case <-time.After(wait):
+		}
 	}
 	p := &Postgres{app: app, conn: conn, lost: make(chan struct{}), stop: make(chan struct{}), every: PingEvery,
 		where: fmt.Sprintf("postgres %s@%s/%s (app %s)", cfg.User, cfg.Host, cfg.Database, app)}

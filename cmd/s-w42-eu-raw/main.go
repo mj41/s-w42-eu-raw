@@ -98,7 +98,7 @@ func main() {
 
 	var state statestore.Store
 	if *stateDB != "" {
-		openCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute) // waits for another copy's lock
+		openCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute) // a database that is down for a moment (retried), or another copy's lock
 		var from *statestore.File
 		if *stateFile != "" {
 			from = &statestore.File{Path: *stateFile}

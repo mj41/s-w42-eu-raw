@@ -176,7 +176,9 @@ func TestPostgresLost(t *testing.T) {
 }
 
 func TestRedact(t *testing.T) {
-	_, err := Open(context.Background(), "postgres://u:sekrit-pass@127.0.0.1:1/db?connect_timeout=1", "x", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second) // Open retries until then
+	defer cancel()
+	_, err := Open(ctx, "postgres://u:sekrit-pass@127.0.0.1:1/db?connect_timeout=1", "x", nil)
 	if err == nil || strings.Contains(err.Error(), "sekrit-pass") {
 		t.Fatalf("error: %v", err)
 	}
@@ -187,3 +189,19 @@ type errorString string
 func (e errorString) Error() string { return string(e) }
 
 func itoa(i int) string { return strconv.Itoa(i) }
+
+// Nothing listening: Open keeps trying until its context ends, instead of failing at once.
+func TestConnectRetries(t *testing.T) {
+	ConnectRetryFirst, ConnectRetryMax = 20*time.Millisecond, 50*time.Millisecond
+	defer func() { ConnectRetryFirst, ConnectRetryMax = time.Second, 10*time.Second }()
+	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := Open(ctx, "postgres://u:sekrit-pass@127.0.0.1:1/db?connect_timeout=1", "x", nil)
+	if err == nil || strings.Contains(err.Error(), "sekrit-pass") {
+		t.Fatalf("error: %v", err)
+	}
+	if d := time.Since(start); d < 350*time.Millisecond {
+		t.Fatalf("gave up after %v, before its context ended", d)
+	}
+}
