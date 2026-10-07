@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/mj41/s-w42-eu-raw/internal/server"
+	"github.com/mj41/s-w42-eu-raw/statestore"
 )
 
 func main() {
@@ -42,6 +43,7 @@ func main() {
 		pairTTL       = flag.Duration("pair-ttl", 5*time.Minute, "lifetime of a pairing code")
 		debug         = flag.Bool("debug", false, "debug logging")
 		stateFile     = flag.String("state-file", defaultStateFile(), "JSON file that keeps pairings and robots across restarts (\"\" disables)")
+		stateDB       = flag.String("state-database", os.Getenv("STATE_DATABASE_URL"), "keep the state in Postgres instead (postgres://user@host/db; the password from PGPASSWORD); a -state-file that exists is imported once, into an empty database")
 		uiDir         = flag.String("ui-dir", "", "development: serve index.html from this directory on every request (e.g. internal/server/ui), so UI edits need only a page reload")
 		tlsListen     = flag.String("tls-listen", "", "also serve browsers over HTTPS on this address, e.g. :8766 (robots stay on -listen)")
 		tlsCert       = flag.String("tls-cert", defaultConfigFile("tls-cert.pem"), "TLS certificate for -tls-listen; a self-signed one is created if missing")
@@ -94,12 +96,26 @@ func main() {
 		}
 	}
 
+	var state statestore.Store
+	if *stateDB != "" {
+		openCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute) // waits for another copy's lock
+		st, err := statestore.Open(openCtx, *stateDB, "raw", *stateFile)
+		cancel()
+		if err != nil {
+			log.Error("state database", "err", err)
+			os.Exit(1)
+		}
+		state = st
+		log.Info("state in the database", "where", st.Where())
+	}
+
 	srv := server.New(server.Config{
 		RobotToken:      token,
 		PublicURL:       strings.TrimRight(*publicURL, "/"),
 		PairTTL:         *pairTTL,
 		UIDir:           *uiDir,
 		StateFile:       *stateFile,
+		State:           state,
 		RobotTokensFile: *invites,
 		TrustedProxies:  *proxies,
 		NoAddressLimits: *noAddrLim,
@@ -129,6 +145,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go srv.RunStateSaver(ctx)
+	if state != nil {
+		go func() { // the database's lock is gone: another copy may write now; stop here
+			select {
+			case <-state.Lost():
+				log.Error("state database: connection (and lock) lost; exiting")
+				os.Exit(1)
+			case <-ctx.Done():
+			}
+		}()
+	}
 	go srv.RunSignInCheck(ctx)
 	go srv.RunSeenReports(ctx)
 	go func() {
@@ -148,6 +174,9 @@ func main() {
 	}
 	if err := srv.SaveState(); err != nil {
 		log.Warn("state not saved", "file", *stateFile, "err", err)
+	}
+	if state != nil {
+		state.Close() // releases the lock for the next copy
 	}
 }
 

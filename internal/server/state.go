@@ -4,12 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -56,14 +52,14 @@ type robotRecord struct {
 	StandbyUntil time.Time              `json:"standby_until,omitzero"`
 }
 
-// loadState restores the snapshot at cfg.StateFile, if there is one.
+// loadState restores the saved snapshot (cfg.State), if there is one.
 func (s *Server) loadState() error {
-	b, err := os.ReadFile(s.cfg.StateFile)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
+	b, err := s.cfg.State.Load(context.Background())
 	if err != nil {
 		return err
+	}
+	if b == nil {
+		return nil
 	}
 	var st stateFile
 	if err := json.Unmarshal(b, &st); err != nil {
@@ -136,7 +132,7 @@ func (s *Server) loadState() error {
 	for _, id := range st.Public {
 		s.public[id] = true
 	}
-	s.log.Info("state loaded", "file", s.cfg.StateFile, "sessions", len(st.Sessions), "robots", len(st.Robots))
+	s.log.Info("state loaded", "state", s.cfg.State.Where(), "sessions", len(st.Sessions), "robots", len(st.Robots))
 	return nil
 }
 
@@ -208,10 +204,10 @@ func (s *Server) snapshot() ([]byte, error) {
 	return b, err
 }
 
-// SaveState writes the snapshot to cfg.StateFile if it changed. The file is
-// replaced atomically and readable only by this user: session IDs are credentials.
+// SaveState saves the snapshot (cfg.State) if it changed. A file is replaced atomically and
+// readable only by this user: session IDs are credentials.
 func (s *Server) SaveState() error {
-	if s.cfg.StateFile == "" {
+	if s.cfg.State == nil {
 		return nil
 	}
 	b, err := s.snapshot()
@@ -223,23 +219,7 @@ func (s *Server) SaveState() error {
 	if bytes.Equal(b, s.lastSaved) {
 		return nil
 	}
-	dir := filepath.Dir(s.cfg.StateFile)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".state-*.json") // mode 0600
-	if err != nil {
-		return err
-	}
-	_, err = tmp.Write(b)
-	if cerr := tmp.Close(); err == nil {
-		err = cerr
-	}
-	if err == nil {
-		err = os.Rename(tmp.Name(), s.cfg.StateFile)
-	}
-	if err != nil {
-		os.Remove(tmp.Name())
+	if err := s.cfg.State.Save(context.Background(), b); err != nil {
 		return err
 	}
 	s.lastSaved = b
@@ -249,7 +229,7 @@ func (s *Server) SaveState() error {
 // RunStateSaver saves the state periodically and right after pairings until
 // ctx ends. Call SaveState once more after the HTTP server has stopped.
 func (s *Server) RunStateSaver(ctx context.Context) {
-	if s.cfg.StateFile == "" {
+	if s.cfg.State == nil {
 		return
 	}
 	t := time.NewTicker(stateSaveInterval)
@@ -264,7 +244,7 @@ func (s *Server) RunStateSaver(ctx context.Context) {
 		}
 		if err := s.SaveState(); err != nil {
 			if err.Error() != lastErr { // e.g. a read-only file system: say it once
-				s.log.Warn("state not saved", "file", s.cfg.StateFile, "err", err)
+				s.log.Warn("state not saved", "state", s.cfg.State.Where(), "err", err)
 			}
 			lastErr = err.Error()
 		} else {

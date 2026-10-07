@@ -26,6 +26,7 @@ import (
 
 	"github.com/mj41/s-w42-eu-raw/robotauth"
 	"github.com/mj41/s-w42-eu-raw/sso"
+	"github.com/mj41/s-w42-eu-raw/statestore"
 	"github.com/mj41/s-w42-eu-raw/wire"
 )
 
@@ -54,7 +55,10 @@ type Config struct {
 	PairTTL   time.Duration // lifetime of a pairing code
 	UIDir     string        // development: serve index.html from this directory instead of the embedded copy
 	StateFile string        // JSON snapshot of pairings and robots, loaded by New (see state.go); "" disables
-	HTTPSPort string        // port of the HTTPS listener for browsers, if any; advertised by /api/info
+	// State: where the snapshot goes instead of StateFile (statestore: a file, or a row in
+	// Postgres in the cluster).
+	State     statestore.Store
+	HTTPSPort string // port of the HTTPS listener for browsers, if any; advertised by /api/info
 	Log       *slog.Logger
 }
 
@@ -202,9 +206,12 @@ func New(cfg Config) *Server {
 		}
 		s.log.Info("robot invite tokens", "file", cfg.RobotTokensFile, "robots", s.invites.count())
 	}
-	if cfg.StateFile != "" {
+	if s.cfg.State == nil && cfg.StateFile != "" {
+		s.cfg.State = &statestore.File{Path: cfg.StateFile}
+	}
+	if s.cfg.State != nil {
 		if err := s.loadState(); err != nil {
-			s.log.Warn("state not loaded, starting empty", "file", cfg.StateFile, "err", err)
+			s.log.Warn("state not loaded, starting empty", "state", s.cfg.State.Where(), "err", err)
 		}
 	}
 	return s
