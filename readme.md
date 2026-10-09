@@ -1,5 +1,7 @@
 # s-w42-eu-raw
 
+<img src="docs/img/robot3d-raw.png" width="240" align="right" alt="A Stackchan robot on Raw data: its face with a speech bubble">
+
 Relay between M5Stack Stackchan robots and web browsers for **Embody Mode**. It lets you see through the robot and control it from any browser, with no app to install.
 
 - **Robot:** opens an outbound WebSocket to the server and registers. It then shows a QR code for pairing, streams telemetry and events, and runs commands.
